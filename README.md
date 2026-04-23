@@ -1,94 +1,156 @@
-# Universal Login Security Middleware API
+# Login Anomaly Detection
 
-A production-grade FastAPI backend for universal login security, anomaly detection, and behavioral analysis.
+A full-stack login security dashboard for detecting suspicious authentication activity. The project combines a FastAPI backend for risk scoring, behavioral learning, OTP verification, audit logging, and attack simulation with a Vite React frontend for login analysis, dashboards, model insights, and admin workflows.
 
 ## Features
 
-- **Password Security Engine**: Validates password strength and maintains blacklist
-- **Behavioral Learning System**: Learns user patterns over time
-- **Anomaly Detection**: Hybrid ML and rule-based detection
-- **Explainable AI**: Provides reasons for security decisions
-- **Adaptive Multi-Step Verification**: OTP-based verification system
-- **Account Lock & Recovery**: Secure account management
-- **Real-Time Learning**: Continuous profile adaptation
-- **Device Trust System**: Tracks trusted devices
-- **Cybersecurity Protections**: Rate limiting, input validation, secure logging
-- **Attack Simulation**: Test endpoints for security validation
+- Password strength validation and blacklist checks
+- Login anomaly detection using rule-based signals and an Isolation Forest model
+- Behavioral learning from successful user logins
+- Adaptive OTP verification for risky logins
+- Account lockout and administrative alert handling
+- Dashboard views for risk trends, locations, alerts, and behavior profiles
+- Simulation endpoints for brute-force, anomaly, and live event testing
 
-## Installation
+## Tech Stack
 
-1. Clone the repository
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. Set up environment variables (copy .env.example to .env and modify)
-4. Run the application:
-   ```bash
-   uvicorn app.main:app --reload
-   ```
+- Frontend: React, TypeScript, Vite, Tailwind CSS, shadcn/ui, React Query
+- Backend: FastAPI, SQLAlchemy, Pydantic, scikit-learn
+- Storage: SQLite by default, PostgreSQL optional
+- Cache/rate limiting: Redis optional
+- Tests: Vitest for frontend tests
 
-## API Endpoints
+## Prerequisites
 
-### Authentication
-- `POST /api/auth/validate-password` - Validate password strength
-- `POST /api/auth/register` - Register new user
-- `POST /api/auth/login` - Login with anomaly detection
-- `POST /api/auth/verify` - Verify login with OTP
+- Node.js 18 or newer
+- npm or Bun
+- Python 3.10 or newer
+- Redis and PostgreSQL if you want to run the production-like setup
 
-### Administration
-- `GET /api/admin/logs` - Get audit logs
-- `GET /api/admin/login-attempts` - Get login attempts
-- `POST /api/admin/retrain-model` - Retrain ML model
-- `POST /api/admin/add-blacklist` - Add password to blacklist
-- `POST /api/admin/unlock` - Unlock account
+## Environment
 
-### Simulation
-- `POST /api/simulation/simulate-brute-force` - Simulate brute force attack
-- `POST /api/simulation/simulate-anomaly` - Simulate various anomalies
+Copy the example environment file and adjust values as needed:
 
-## Usage
+```bash
+cp .env.example .env
+```
 
-### Basic Login Flow
+By default, the backend can run with SQLite:
 
-1. Register user with strong password
-2. Login with user credentials and metadata
-3. Receive decision: allow, require_verification, or block
-4. If verification required, provide OTP
-5. System learns from successful logins
+```env
+DATABASE_URL=sqlite:///./login_security.db
+REDIS_URL=redis://localhost:6379
+SECRET_KEY=change-this-before-production
+```
 
-### Integration
+The checked-in `.env.example` also includes PostgreSQL settings for use with `docker-compose.yml`.
 
-Send login data including:
-- username, password
-- IP address, location
-- device fingerprint
-- typing speed, keystroke timing
+## Backend Setup
 
-Receive decision with risk score and reasons.
+Create and activate a virtual environment, then install Python dependencies:
 
-## Security Features
+```bash
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+```
 
-- Rate limiting (Redis-based)
-- Account lock after failed attempts
-- Travel velocity detection
-- Device fingerprinting
-- Behavioral biometrics
-- Secure password hashing (bcrypt)
-- Audit logging
+Start the API server:
 
-## Configuration
+```bash
+uvicorn app.main:app --reload
+```
 
-Modify settings in `app/config.py` or environment variables.
+The API runs at `http://127.0.0.1:8000`.
 
-## Database
+Useful backend URLs:
 
-Uses SQLAlchemy with SQLite (default) or PostgreSQL.
+- `GET /health`
+- `GET /docs`
+- `GET /redoc`
 
-## ML Model
+## Frontend Setup
 
-Isolation Forest for anomaly detection, retrainable via admin endpoint.
+Install dependencies:
 
-## Testing
+```bash
+npm install
+```
 
-Use simulation endpoints to test various attack scenarios.
+Start the Vite dev server:
+
+```bash
+npm run dev
+```
+
+The frontend runs at `http://localhost:8080` and proxies `/api` requests to `http://127.0.0.1:8000`.
+
+## Docker Services
+
+To run PostgreSQL and Redis locally:
+
+```bash
+docker compose up -d db redis
+```
+
+Then set `DATABASE_URL` and `REDIS_URL` in `.env` to match the values in `docker-compose.yml`.
+
+## Common Commands
+
+```bash
+npm run dev          # Start frontend development server
+npm run build        # Build frontend for production
+npm run lint         # Run ESLint
+npm run test         # Run frontend tests
+uvicorn app.main:app --reload
+```
+
+## API Overview
+
+Authentication:
+
+- `POST /api/auth/validate-password`
+- `POST /api/auth/register`
+- `POST /api/auth/login`
+- `POST /api/auth/verify`
+- `POST /api/auth/analyze`
+
+Administration:
+
+- `GET /api/admin/dashboard`
+- `GET /api/admin/behavior/{username}`
+- `GET /api/admin/alerts`
+- `POST /api/admin/alerts/{alert_id}/resolve`
+- `POST /api/admin/alerts/{alert_id}/block`
+- `GET /api/admin/logs`
+- `GET /api/admin/login-attempts`
+- `POST /api/admin/retrain-model`
+- `POST /api/admin/add-blacklist`
+- `POST /api/admin/unlock`
+
+Simulation:
+
+- `POST /api/simulation/simulate-brute-force`
+- `POST /api/simulation/simulate-anomaly`
+- `POST /api/simulation/live/generate`
+
+## Project Structure
+
+```text
+app/                 FastAPI backend
+  routers/           API route modules
+  services/          Security, learning, logging, verification services
+  database/          SQLAlchemy connection and models
+  ml/                Anomaly detection model
+src/                 React frontend
+  components/        Shared UI and dashboard components
+  pages/             App routes/pages
+  lib/               API client and utilities
+public/              Static frontend assets
+```
+
+## Notes
+
+- Do not commit `.env`, local databases, logs, virtual environments, or dependency folders.
+- Change `SECRET_KEY` before using the app outside local development.
+- The SQLite database file is generated automatically when the backend starts.

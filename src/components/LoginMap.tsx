@@ -1,13 +1,14 @@
 import { useEffect, useRef } from "react";
-import type { LoginLog } from "@/lib/mockData";
+import type { DashboardLog } from "@/lib/api";
 
 interface Props {
-  logs: LoginLog[];
+  logs: DashboardLog[];
 }
 
 export default function LoginMap({ logs }: Props) {
   const mapRef = useRef<HTMLDivElement>(null);
-  const mapInstance = useRef<any>(null);
+  const mapInstance = useRef<import("leaflet").Map | null>(null);
+  const layerGroupRef = useRef<import("leaflet").LayerGroup | null>(null);
 
   useEffect(() => {
     if (!mapRef.current || mapInstance.current) return;
@@ -27,31 +28,46 @@ export default function LoginMap({ logs }: Props) {
         zoomControl: false,
         attributionControl: false,
       });
+      const markerLayer = L.layerGroup().addTo(map);
 
       L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png").addTo(map);
 
-      logs.slice(0, 30).forEach((log) => {
-        const color = log.risk > 70 ? "#ef4444" : log.risk > 40 ? "#f59e0b" : "#22c55e";
-        L.circleMarker([log.lat, log.lng], {
-          radius: 6,
-          fillColor: color,
-          fillOpacity: 0.8,
-          color: color,
-          weight: 1,
-        })
-          .bindPopup(
-            `<div style="font-size:12px;color:#333"><strong>${log.user}</strong><br/>${log.location}<br/>Risk: ${log.risk}%</div>`
-          )
-          .addTo(map);
-      });
-
       mapInstance.current = map;
+      layerGroupRef.current = markerLayer;
     });
 
     return () => {
+      layerGroupRef.current?.clearLayers();
+      layerGroupRef.current = null;
       mapInstance.current?.remove();
       mapInstance.current = null;
     };
+  }, []);
+
+  useEffect(() => {
+    if (!mapInstance.current || !layerGroupRef.current) return;
+
+    import("leaflet").then((L) => {
+      layerGroupRef.current?.clearLayers();
+
+      logs
+        .filter((log) => log.location_lat != null && log.location_lon != null)
+        .slice(0, 30)
+        .forEach((log) => {
+          const color = log.risk > 70 ? "#ef4444" : log.risk > 40 ? "#f59e0b" : "#22c55e";
+          L.circleMarker([log.location_lat!, log.location_lon!], {
+            radius: 6,
+            fillColor: color,
+            fillOpacity: 0.8,
+            color: color,
+            weight: 1,
+          })
+            .bindPopup(
+              `<div style="font-size:12px;color:#333"><strong>${log.user}</strong><br/>${log.location}<br/>Risk: ${log.risk}%</div>`
+            )
+            .addTo(layerGroupRef.current!);
+        });
+    });
   }, [logs]);
 
   return <div ref={mapRef} className="w-full h-full rounded-xl" style={{ minHeight: 300 }} />;

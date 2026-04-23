@@ -1,15 +1,23 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Shield, User, KeyRound, Eye, EyeOff, MapPin, Monitor, Clock, Zap } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Eye, EyeOff, KeyRound, Shield, User, Zap } from "lucide-react";
+
+import ExplainableAIPanel from "@/components/ExplainableAIPanel";
 import GlassCard from "@/components/GlassCard";
 import PasswordStrengthMeter from "@/components/PasswordStrengthMeter";
 import RiskGauge from "@/components/RiskGauge";
-import ExplainableAIPanel from "@/components/ExplainableAIPanel";
-import { generateUserProfile } from "@/lib/mockData";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { toast } from "@/components/ui/sonner";
+import { analyzeLogin, loginRequest, verifyOtp } from "@/lib/api";
 
 type LoginState = "idle" | "loading" | "risk-check" | "otp" | "success";
+
+function getDeviceId() {
+  const platform = navigator.platform || "web";
+  const agent = navigator.userAgent || "browser";
+  return `${platform}-${agent}`.replace(/\s+/g, "-").slice(0, 120);
+}
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -18,63 +26,132 @@ export default function LoginPage() {
   const [showPw, setShowPw] = useState(false);
   const [state, setState] = useState<LoginState>("idle");
   const [risk, setRisk] = useState(0);
+  const [level, setLevel] = useState<"LOW" | "MEDIUM" | "HIGH">("LOW");
   const [otp, setOtp] = useState("");
+  const [debugOtp, setDebugOtp] = useState<string | null>(null);
   const [reasons, setReasons] = useState<string[]>([]);
-  const [profile, setProfile] = useState<ReturnType<typeof generateUserProfile> | null>(null);
+  const [verificationToken, setVerificationToken] = useState<string | null>(null);
 
-  const handleLogin = () => {
-    if (!username.trim() || !password.trim()) return;
+  const analysisPayload = useMemo(() => {
+    const now = new Date();
+    return {
+      login_hour: Number((now.getHours() + now.getMinutes() / 60).toFixed(2)),
+      location_lat: 19.076,
+      location_lon: 72.8777,
+      typing_speed: Math.max(1, Number((password.length / 2.4).toFixed(2))),
+      failed_attempts: username.toLowerCase().includes("attacker") ? 6 : 0,
+      device_id: getDeviceId(),
+      ip_address: "127.0.0.1",
+    };
+  }, [password, username]);
+
+  const syncRiskState = (payload: { risk_score: number; level: "LOW" | "MEDIUM" | "HIGH"; reasons: string[] }) => {
+    setRisk(Math.round(payload.risk_score));
+    setLevel(payload.level);
+    setReasons(payload.reasons);
+  };
+
+  const handleLogin = async () => {
+    if (!username.trim() || !password.trim()) {
+      toast.error("Enter both username and password to continue.");
+      return;
+    }
+
     setState("loading");
+    setDebugOtp(null);
+    setVerificationToken(null);
 
-    setTimeout(() => {
-      const p = generateUserProfile(username);
-      setProfile(p);
-      const r = Math.floor(Math.random() * 100);
-      setRisk(r);
+    try {
+      const result = await loginRequest({
+        username: username.trim(),
+        password,
+        ...analysisPayload,
+      });
 
-      const flagReasons: string[] = [];
-      if (r > 40) {
-        if (Math.random() > 0.4) flagReasons.push("New device detected");
-        if (Math.random() > 0.4) flagReasons.push("Unusual location");
-        if (Math.random() > 0.5) flagReasons.push("Login outside normal hours");
-        if (flagReasons.length === 0) flagReasons.push("Behavioral anomaly");
-      }
-      setReasons(flagReasons);
+      syncRiskState(result);
 
-      if (r > 60) {
+      if (result.decision === "require_verification" && result.verification_token) {
+        setVerificationToken(result.verification_token);
+        setDebugOtp(result.debug_otp ?? null);
         setState("otp");
-      } else {
-        setState("risk-check");
-        setTimeout(() => setState("success"), 2000);
+        toast.warning("Extra verification is required for this login.");
+        return;
       }
-    }, 1500);
+
+      if (result.decision === "block") {
+        setState("risk-check");
+        toast.error(result.reasons[0] ?? "This login was blocked.");
+        return;
+      }
+
+      setState("risk-check");
+      window.setTimeout(() => setState("success"), 1200);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to analyze this login.";
+      if (message === "Invalid credentials") {
+        try {
+          const fallback = await analyzeLogin({
+            username: username.trim(),
+            ...analysisPayload,
+          });
+          syncRiskState(fallback);
+          setState("risk-check");
+          toast.warning("Analyzed risk only. Credentials were not accepted by the backend.");
+          return;
+        } catch (fallbackError) {
+          setState("idle");
+          toast.error(fallbackError instanceof Error ? fallbackError.message : "Unable to analyze this login.");
+          return;
+        }
+      }
+      setState("idle");
+      toast.error(message);
+    }
   };
 
-  const handleOtp = () => {
-    if (otp.length < 4) return;
+  const handleOtp = async () => {
+    if (!verificationToken || otp.length !== 6) {
+      toast.error("Enter the full 6-digit OTP.");
+      return;
+    }
+
     setState("loading");
-    setTimeout(() => {
+    try {
+      await verifyOtp(username.trim(), otp, verificationToken);
       setState("success");
-    }, 1000);
+      toast.success("OTP verified successfully.");
+    } catch (error) {
+      setState("otp");
+      toast.error(error instanceof Error ? error.message : "OTP verification failed.");
+    }
   };
 
-  const handleSimulateAttack = () => {
+  const handleSimulateAttack = async () => {
     setUsername("attacker_bot");
     setPassword("password123");
     setState("loading");
-    setTimeout(() => {
-      const p = generateUserProfile("attacker_bot");
-      setProfile(p);
-      setRisk(92);
-      setReasons(["New device detected", "Unusual location", "Login outside normal hours", "Multiple failed attempts"]);
-      setState("otp");
-    }, 1500);
+
+    try {
+      const result = await analyzeLogin({
+        username: "attacker_bot",
+        ...analysisPayload,
+        failed_attempts: 8,
+        typing_speed: 12,
+        device_id: "unknown-device-attack",
+      });
+      syncRiskState(result);
+      setVerificationToken(result.verification_token ?? null);
+      setDebugOtp(result.debug_otp ?? null);
+      setState("risk-check");
+    } catch (error) {
+      setState("idle");
+      toast.error(error instanceof Error ? error.message : "Simulation failed.");
+    }
   };
 
   return (
     <div className="min-h-[calc(100vh-3.5rem)] flex items-center justify-center py-8">
       <div className="w-full max-w-md space-y-5 animate-slide-up">
-        {/* Header */}
         <div className="text-center space-y-2">
           <div className="inline-flex p-3 rounded-2xl bg-primary/10 cyber-glow mb-2">
             <Shield className="w-8 h-8 text-primary" />
@@ -89,35 +166,15 @@ export default function LoginPage() {
               <Shield className="w-8 h-8 text-success" />
             </div>
             <h2 className="text-lg font-semibold text-success">Login Successful</h2>
-            <p className="text-sm text-muted-foreground">Identity verified. Risk Score: {risk}%</p>
-
-            {profile && (
-              <div className="grid grid-cols-3 gap-3 pt-3 border-t border-border/50">
-                <div className="text-center">
-                  <Clock className="w-4 h-4 mx-auto text-muted-foreground mb-1" />
-                  <p className="text-xs text-muted-foreground">Last Login</p>
-                  <p className="text-xs font-medium">{new Date(profile.lastLogin).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</p>
-                </div>
-                <div className="text-center">
-                  <Monitor className="w-4 h-4 mx-auto text-muted-foreground mb-1" />
-                  <p className="text-xs text-muted-foreground">Device</p>
-                  <p className="text-xs font-medium">{profile.lastDevice.split("/")[0]}</p>
-                </div>
-                <div className="text-center">
-                  <MapPin className="w-4 h-4 mx-auto text-muted-foreground mb-1" />
-                  <p className="text-xs text-muted-foreground">Location</p>
-                  <p className="text-xs font-medium">{profile.lastLocation.split(",")[0]}</p>
-                </div>
-              </div>
-            )}
-
+            <p className="text-sm text-muted-foreground">
+              Verified with a {level.toLowerCase()} risk score of {risk}%.
+            </p>
             <Button className="w-full" onClick={() => navigate("/dashboard")}>
               Go to Dashboard
             </Button>
           </GlassCard>
         ) : (
           <>
-            {/* Login Form */}
             <GlassCard glow>
               <div className="space-y-4">
                 <div className="space-y-2">
@@ -157,8 +214,8 @@ export default function LoginPage() {
                 </div>
 
                 {state === "idle" && (
-                  <Button className="w-full" onClick={handleLogin} disabled={!username || !password}>
-                    Authenticate
+                  <Button className="w-full" onClick={handleLogin} disabled={!username.trim() || !password.trim()}>
+                    Analyze & Authenticate
                   </Button>
                 )}
 
@@ -171,7 +228,6 @@ export default function LoginPage() {
               </div>
             </GlassCard>
 
-            {/* OTP */}
             {state === "otp" && (
               <GlassCard className="border-warning/30 animate-slide-up space-y-4">
                 <div className="flex items-center gap-2 text-warning">
@@ -179,12 +235,15 @@ export default function LoginPage() {
                   <h3 className="font-semibold text-sm">Additional Verification Required</h3>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  High risk score detected ({risk}%). Please enter the OTP sent to your registered device.
+                  Risk score {risk}% ({level}). Enter the OTP to continue.
                 </p>
-                <div className="relative">
-                  <div className="flex items-center justify-center">
-                    <RiskGauge risk={risk} />
-                  </div>
+                {debugOtp && (
+                  <p className="text-xs text-muted-foreground">
+                    Debug OTP: <span className="font-mono text-foreground">{debugOtp}</span>
+                  </p>
+                )}
+                <div className="flex items-center justify-center">
+                  <RiskGauge risk={risk} />
                 </div>
                 <Input
                   placeholder="Enter 6-digit OTP"
@@ -193,28 +252,27 @@ export default function LoginPage() {
                   value={otp}
                   onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))}
                 />
-                <Button className="w-full" onClick={handleOtp} disabled={otp.length < 4}>
+                <Button className="w-full" onClick={handleOtp} disabled={otp.length !== 6}>
                   Verify OTP
                 </Button>
               </GlassCard>
             )}
 
-            {/* Risk check animation */}
             {state === "risk-check" && (
               <GlassCard className="animate-slide-up text-center space-y-3">
                 <div className="flex items-center justify-center">
                   <RiskGauge risk={risk} />
                 </div>
-                <p className="text-sm text-success font-medium">Low risk — Granting access...</p>
+                <p className={`text-sm font-medium ${level === "HIGH" ? "text-destructive" : "text-success"}`}>
+                  {level === "HIGH" ? "High risk detected - access limited." : "Risk check complete."}
+                </p>
               </GlassCard>
             )}
 
-            {/* Explainable AI */}
             {(state === "otp" || state === "risk-check") && reasons.length > 0 && (
               <ExplainableAIPanel reasons={reasons} risk={risk} />
             )}
 
-            {/* Attack Simulation */}
             {state === "idle" && (
               <button
                 onClick={handleSimulateAttack}

@@ -1,29 +1,64 @@
-import { useState } from "react";
-import { Clock, MapPin, Monitor, TrendingUp, BookOpen } from "lucide-react";
-import GlassCard from "@/components/GlassCard";
-import { generateUserProfile, type UserProfile } from "@/lib/mockData";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
+import { useEffect, useState } from "react";
+import { BookOpen, Clock, MapPin, Monitor, TrendingUp } from "lucide-react";
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  RadarChart, PolarGrid, PolarAngleAxis, Radar,
+  CartesianGrid,
+  Line,
+  LineChart,
+  PolarAngleAxis,
+  PolarGrid,
+  Radar,
+  RadarChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
 } from "recharts";
+
+import GlassCard from "@/components/GlassCard";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { toast } from "@/components/ui/sonner";
+import { fetchBehavior, type BehaviorResponse } from "@/lib/api";
+
+const emptyBehavior: BehaviorResponse = {
+  username: "alex.chen",
+  is_new_user: true,
+  typical_login_time: "No data yet",
+  frequent_locations: [],
+  devices_used: [],
+  trust_score: 0,
+  trend_data: [],
+  comparison_data: [],
+  trust_history: [],
+  failed_attempts: 0,
+};
 
 export default function BehaviorPage() {
   const [username, setUsername] = useState("alex.chen");
-  const [profile, setProfile] = useState<UserProfile>(generateUserProfile("alex.chen"));
+  const [profile, setProfile] = useState<BehaviorResponse>(emptyBehavior);
+  const [loading, setLoading] = useState(false);
 
-  const loadUser = () => {
-    if (username.trim()) setProfile(generateUserProfile(username));
+  const loadUser = async (targetUsername: string) => {
+    const trimmed = targetUsername.trim();
+    if (!trimmed) {
+      toast.error("Enter a username to analyze.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetchBehavior(trimmed);
+      setProfile(response);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to load user behavior.");
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const radarData = [
-    { axis: "Login Time", normal: 85, current: 65 + Math.floor(Math.random() * 30) },
-    { axis: "Location", normal: 90, current: 40 + Math.floor(Math.random() * 50) },
-    { axis: "Device", normal: 95, current: 70 + Math.floor(Math.random() * 25) },
-    { axis: "Session Length", normal: 80, current: 50 + Math.floor(Math.random() * 40) },
-    { axis: "Action Pattern", normal: 88, current: 55 + Math.floor(Math.random() * 35) },
-  ];
+  useEffect(() => {
+    void loadUser(username);
+  }, []);
 
   return (
     <div className="space-y-5 animate-slide-up">
@@ -36,20 +71,20 @@ export default function BehaviorPage() {
             value={username}
             onChange={(e) => setUsername(e.target.value)}
           />
-          <Button size="sm" onClick={loadUser}>Analyze</Button>
+          <Button size="sm" onClick={() => void loadUser(username)} disabled={loading}>
+            {loading ? "Loading..." : "Analyze"}
+          </Button>
         </div>
       </div>
 
-      {/* Cold start badge */}
-      {profile.isNewUser && (
+      {profile.is_new_user && (
         <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-warning/10 border border-warning/20 text-warning text-sm animate-fade-in">
           <BookOpen className="w-4 h-4" />
           <span className="font-medium">Learning Mode</span>
-          <span className="text-muted-foreground">— Insufficient behavioral data. Model is calibrating.</span>
+          <span className="text-muted-foreground">- Insufficient behavioral data. Model is calibrating.</span>
         </div>
       )}
 
-      {/* Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <GlassCard className="glass-card-hover">
           <div className="flex items-center gap-3">
@@ -58,7 +93,7 @@ export default function BehaviorPage() {
             </div>
             <div>
               <p className="text-xs text-muted-foreground">Typical Login Time</p>
-              <p className="text-sm font-semibold">{profile.typicalLoginTime}</p>
+              <p className="text-sm font-semibold">{profile.typical_login_time}</p>
             </div>
           </div>
         </GlassCard>
@@ -69,7 +104,7 @@ export default function BehaviorPage() {
             </div>
             <div>
               <p className="text-xs text-muted-foreground">Frequent Locations</p>
-              <p className="text-sm font-semibold">{profile.frequentLocations.join(", ")}</p>
+              <p className="text-sm font-semibold">{profile.frequent_locations.join(", ") || "No locations yet"}</p>
             </div>
           </div>
         </GlassCard>
@@ -80,13 +115,12 @@ export default function BehaviorPage() {
             </div>
             <div>
               <p className="text-xs text-muted-foreground">Devices Used</p>
-              <p className="text-sm font-semibold">{profile.devicesUsed.length} registered</p>
+              <p className="text-sm font-semibold">{profile.devices_used.length} registered</p>
             </div>
           </div>
         </GlassCard>
       </div>
 
-      {/* Comparison panel */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <GlassCard>
           <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
@@ -94,7 +128,7 @@ export default function BehaviorPage() {
             Current vs Normal Pattern
           </h3>
           <ResponsiveContainer width="100%" height={260}>
-            <RadarChart data={radarData}>
+            <RadarChart data={profile.comparison_data}>
               <PolarGrid stroke="hsl(222,30%,18%)" />
               <PolarAngleAxis dataKey="axis" tick={{ fontSize: 10, fill: "hsl(215,20%,55%)" }} />
               <Radar name="Normal" dataKey="normal" stroke="hsl(142,76%,45%)" fill="hsl(142,76%,45%)" fillOpacity={0.15} />
@@ -111,15 +145,14 @@ export default function BehaviorPage() {
           </ResponsiveContainer>
         </GlassCard>
 
-        {/* Trust Score Timeline */}
         <GlassCard>
           <h3 className="text-sm font-semibold mb-3">Trust Score Timeline</h3>
           <div className="flex items-center gap-2 mb-3">
-            <span className="text-3xl font-bold gradient-text">{profile.trustScore}</span>
+            <span className="text-3xl font-bold gradient-text">{Math.round(profile.trust_score)}</span>
             <span className="text-xs text-muted-foreground">/ 100</span>
           </div>
           <ResponsiveContainer width="100%" height={200}>
-            <LineChart data={profile.trustHistory}>
+            <LineChart data={profile.trust_history}>
               <CartesianGrid strokeDasharray="3 3" stroke="hsl(222,30%,18%)" />
               <XAxis dataKey="date" tick={{ fontSize: 9, fill: "hsl(215,20%,55%)" }} />
               <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: "hsl(215,20%,55%)" }} />
@@ -137,14 +170,40 @@ export default function BehaviorPage() {
         </GlassCard>
       </div>
 
-      {/* Device list */}
+      <GlassCard>
+        <h3 className="text-sm font-semibold mb-3">Behavior Trends</h3>
+        <ResponsiveContainer width="100%" height={240}>
+          <LineChart data={profile.trend_data}>
+            <CartesianGrid strokeDasharray="3 3" stroke="hsl(222,30%,18%)" />
+            <XAxis dataKey="label" tick={{ fontSize: 10, fill: "hsl(215,20%,55%)" }} />
+            <YAxis tick={{ fontSize: 10, fill: "hsl(215,20%,55%)" }} />
+            <Tooltip
+              contentStyle={{
+                backgroundColor: "hsl(222,47%,9%)",
+                border: "1px solid hsl(222,30%,18%)",
+                borderRadius: 8,
+                fontSize: 12,
+              }}
+            />
+            <Line type="monotone" dataKey="login_count" stroke="hsl(187,100%,50%)" strokeWidth={2} dot={false} name="Login Trends" />
+            <Line type="monotone" dataKey="avg_typing_speed" stroke="hsl(142,76%,45%)" strokeWidth={2} dot={false} name="Typing Speed" />
+            <Line type="monotone" dataKey="failed_attempts" stroke="hsl(0,72%,55%)" strokeWidth={2} dot={false} name="Failed Attempts" />
+          </LineChart>
+        </ResponsiveContainer>
+      </GlassCard>
+
       <GlassCard>
         <h3 className="text-sm font-semibold mb-3">Registered Devices</h3>
         <div className="space-y-2">
-          {profile.devicesUsed.map((d, i) => (
-            <div key={i} className="flex items-center gap-3 p-3 rounded-lg bg-secondary/30 border border-border/30">
+          {profile.devices_used.length === 0 && (
+            <div className="p-3 rounded-lg bg-secondary/30 border border-border/30 text-sm text-muted-foreground">
+              No trusted devices recorded yet.
+            </div>
+          )}
+          {profile.devices_used.map((device, index) => (
+            <div key={`${device}-${index}`} className="flex items-center gap-3 p-3 rounded-lg bg-secondary/30 border border-border/30">
               <Monitor className="w-4 h-4 text-muted-foreground" />
-              <span className="text-sm">{d}</span>
+              <span className="text-sm">{device}</span>
               <span className="ml-auto text-xs px-2 py-0.5 rounded-full bg-success/10 text-success">Trusted</span>
             </div>
           ))}

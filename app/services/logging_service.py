@@ -40,3 +40,16 @@ class LoggingService:
         db.commit()
 
         self.logger.info(f"Admin action by {admin_user_id}: {action}")
+
+    def log_security_event(self, user_id: int, action: str, details: str, db: Session, ip_address: str = None):
+        audit_log = AuditLog(
+            user_id=user_id,
+            action=action,
+            details=details,
+            timestamp=datetime.utcnow(),
+            ip_address=ip_address,
+        )
+        db.add(audit_log)
+        db.commit()
+
+        self.logger.info(f"Security event for user {user_id}: {action}")

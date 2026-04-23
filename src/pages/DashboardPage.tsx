@@ -1,62 +1,100 @@
-import { useState, useEffect } from "react";
-import { Search, RefreshCw, Filter } from "lucide-react";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import GlassCard from "@/components/GlassCard";
-import LoginMap from "@/components/LoginMap";
-import { generateLoginLogs, generateRiskTimeline, type LoginLog } from "@/lib/mockData";
+import { useEffect, useMemo, useState } from "react";
+import { Filter, RefreshCw, Search } from "lucide-react";
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell,
+  CartesianGrid,
+  Cell,
+  Line,
+  LineChart,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
 } from "recharts";
 
+import GlassCard from "@/components/GlassCard";
+import LoginMap from "@/components/LoginMap";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { toast } from "@/components/ui/sonner";
+import { fetchDashboard, generateLiveSimulation, type DashboardResponse } from "@/lib/api";
+
+const emptyDashboard: DashboardResponse = {
+  logs: [],
+  timeline: [],
+  distribution: [],
+};
+
 export default function DashboardPage() {
-  const [logs, setLogs] = useState<LoginLog[]>([]);
+  const [dashboard, setDashboard] = useState<DashboardResponse>(emptyDashboard);
   const [search, setSearch] = useState("");
   const [riskFilter, setRiskFilter] = useState<string>("all");
-  const timeline = generateRiskTimeline();
+  const [loading, setLoading] = useState(false);
+
+  const loadDashboard = async () => {
+    setLoading(true);
+    try {
+      const response = await fetchDashboard();
+      if (response.logs.length === 0) {
+        await generateLiveSimulation(12);
+        const seededResponse = await fetchDashboard();
+        setDashboard(seededResponse);
+        return;
+      }
+      setDashboard(response);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to load dashboard data.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    setLogs(generateLoginLogs(40));
-    const iv = setInterval(() => {
-      setLogs((prev) => {
-        const newLogs = generateLoginLogs(2);
-        return [...newLogs, ...prev].slice(0, 60);
-      });
-    }, 8000);
-    return () => clearInterval(iv);
+    void loadDashboard();
+    const intervalId = window.setInterval(() => {
+      void generateLiveSimulation(2)
+        .then(() => loadDashboard())
+        .catch((error: unknown) => {
+          toast.error(error instanceof Error ? error.message : "Unable to refresh simulated traffic.");
+        });
+    }, 12000);
+    return () => window.clearInterval(intervalId);
   }, []);
 
-  const filtered = logs.filter((l) => {
-    if (search && !l.user.toLowerCase().includes(search.toLowerCase())) return false;
-    if (riskFilter === "high" && l.risk <= 60) return false;
-    if (riskFilter === "medium" && (l.risk <= 30 || l.risk > 60)) return false;
-    if (riskFilter === "low" && l.risk > 30) return false;
-    return true;
-  });
+  const filtered = useMemo(() => {
+    return dashboard.logs.filter((log) => {
+      if (search && !log.user.toLowerCase().includes(search.toLowerCase())) return false;
+      if (riskFilter === "high" && log.risk < 70) return false;
+      if (riskFilter === "medium" && (log.risk < 40 || log.risk >= 70)) return false;
+      if (riskFilter === "low" && log.risk >= 40) return false;
+      return true;
+    });
+  }, [dashboard.logs, riskFilter, search]);
 
-  const pieData = [
-    { name: "Normal", value: logs.filter((l) => l.status === "safe").length },
-    { name: "Suspicious", value: logs.filter((l) => l.status === "suspicious").length },
-    { name: "Blocked", value: logs.filter((l) => l.status === "blocked").length },
-  ];
-  const PIE_COLORS = ["hsl(142,76%,45%)", "hsl(38,92%,55%)", "hsl(0,72%,55%)"];
+  const pieData = dashboard.distribution.length
+    ? dashboard.distribution
+    : [
+        { name: "Normal", value: 0 },
+        { name: "Suspicious", value: 0 },
+        { name: "Blocked", value: 0 },
+      ];
+  const pieColors = ["hsl(142,76%,45%)", "hsl(38,92%,55%)", "hsl(0,72%,55%)"];
 
   return (
     <div className="space-y-5 animate-slide-up">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold">Security Dashboard</h1>
-        <Button variant="outline" size="sm" onClick={() => setLogs(generateLoginLogs(40))}>
-          <RefreshCw className="w-3.5 h-3.5 mr-1.5" /> Refresh
+        <Button variant="outline" size="sm" onClick={() => void loadDashboard()} disabled={loading}>
+          <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${loading ? "animate-spin" : ""}`} /> Refresh
         </Button>
       </div>
 
-      {/* Charts row */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <GlassCard className="lg:col-span-2">
           <h3 className="text-sm font-semibold mb-3">Risk Score Over Time</h3>
           <ResponsiveContainer width="100%" height={220}>
-            <LineChart data={timeline}>
+            <LineChart data={dashboard.timeline}>
               <CartesianGrid strokeDasharray="3 3" stroke="hsl(222,30%,18%)" />
               <XAxis dataKey="time" tick={{ fontSize: 10, fill: "hsl(215,20%,55%)" }} />
               <YAxis tick={{ fontSize: 10, fill: "hsl(215,20%,55%)" }} />
@@ -80,7 +118,7 @@ export default function DashboardPage() {
             <PieChart>
               <Pie data={pieData} cx="50%" cy="50%" innerRadius={50} outerRadius={75} paddingAngle={3} dataKey="value">
                 {pieData.map((_, i) => (
-                  <Cell key={i} fill={PIE_COLORS[i]} />
+                  <Cell key={i} fill={pieColors[i]} />
                 ))}
               </Pie>
               <Tooltip
@@ -94,25 +132,23 @@ export default function DashboardPage() {
             </PieChart>
           </ResponsiveContainer>
           <div className="flex justify-center gap-4 text-xs">
-            {pieData.map((d, i) => (
-              <div key={d.name} className="flex items-center gap-1.5">
-                <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: PIE_COLORS[i] }} />
-                <span className="text-muted-foreground">{d.name}</span>
+            {pieData.map((item, i) => (
+              <div key={item.name} className="flex items-center gap-1.5">
+                <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: pieColors[i] }} />
+                <span className="text-muted-foreground">{item.name}</span>
               </div>
             ))}
           </div>
         </GlassCard>
       </div>
 
-      {/* Map */}
       <GlassCard>
         <h3 className="text-sm font-semibold mb-3">Login Geo Map</h3>
         <div className="rounded-xl overflow-hidden border border-border/30">
-          <LoginMap logs={logs} />
+          <LoginMap logs={dashboard.logs} />
         </div>
       </GlassCard>
 
-      {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -124,22 +160,21 @@ export default function DashboardPage() {
           />
         </div>
         <div className="flex gap-2">
-          {["all", "low", "medium", "high"].map((f) => (
+          {["all", "low", "medium", "high"].map((filterValue) => (
             <Button
-              key={f}
+              key={filterValue}
               size="sm"
-              variant={riskFilter === f ? "default" : "outline"}
-              onClick={() => setRiskFilter(f)}
+              variant={riskFilter === filterValue ? "default" : "outline"}
+              onClick={() => setRiskFilter(filterValue)}
               className="capitalize text-xs"
             >
-              {f === "all" && <Filter className="w-3 h-3 mr-1" />}
-              {f}
+              {filterValue === "all" && <Filter className="w-3 h-3 mr-1" />}
+              {filterValue}
             </Button>
           ))}
         </div>
       </div>
 
-      {/* Logs table */}
       <GlassCard className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -171,12 +206,12 @@ export default function DashboardPage() {
                     <div className="w-12 h-1.5 rounded-full bg-secondary overflow-hidden">
                       <div
                         className={`h-full rounded-full ${
-                          log.risk > 70 ? "bg-destructive" : log.risk > 40 ? "bg-warning" : "bg-success"
+                          log.risk >= 70 ? "bg-destructive" : log.risk >= 40 ? "bg-warning" : "bg-success"
                         }`}
                         style={{ width: `${log.risk}%` }}
                       />
                     </div>
-                    <span className="text-xs font-mono">{log.risk}%</span>
+                    <span className="text-xs font-mono">{Math.round(log.risk)}%</span>
                   </div>
                 </td>
                 <td className="py-2.5 px-3">
@@ -185,8 +220,8 @@ export default function DashboardPage() {
                       log.status === "safe"
                         ? "bg-success/10 text-success"
                         : log.status === "suspicious"
-                        ? "bg-warning/10 text-warning"
-                        : "bg-destructive/10 text-destructive"
+                          ? "bg-warning/10 text-warning"
+                          : "bg-destructive/10 text-destructive"
                     }`}
                   >
                     {log.status}
@@ -194,6 +229,13 @@ export default function DashboardPage() {
                 </td>
               </tr>
             ))}
+            {filtered.length === 0 && (
+              <tr>
+                <td colSpan={6} className="py-6 text-center text-sm text-muted-foreground">
+                  No login attempts match the current filters.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </GlassCard>

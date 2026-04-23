@@ -1,25 +1,63 @@
+# Dependencies
+node_modules/
+.venv/
+venv/
+env/
+
+# Build output
+dist/
+dist-ssr/
+build/
+coverage/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Environment and local config
+.env
+.env.*
+!.env.example
+!app/.env.example
+*.local
+
+# Databases and generated model/data files
+*.db
+*.sqlite
+*.sqlite3
+*.pkl
+*.joblib
+
 # Logs
-logs
+logs/
 *.log
+*.err
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
-*.local
+# Package manager caches
+.npm/
+.pnpm-store/
+
+# Deployment and tooling
+.vercel/
 
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
-.idea
+.idea/
 .DS_Store
+Thumbs.db
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
-.vercel

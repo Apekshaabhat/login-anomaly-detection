@@ -88,3 +88,22 @@ class AuditLog(Base):
     details = Column(Text)
     timestamp = Column(DateTime, default=datetime.utcnow)
     ip_address = Column(String, nullable=True)
+
+
+class AlertRecord(Base):
+    __tablename__ = "alert_records"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    login_attempt_id = Column(Integer, ForeignKey("login_attempts.id"), nullable=True)
+    severity = Column(String, index=True)  # low, medium, high, critical
+    message = Column(Text)
+    attack_type = Column(String, nullable=True)
+    resolved = Column(Boolean, default=False)
+    requires_manual_action = Column(Boolean, default=False)
+    auto_action = Column(String, nullable=True)  # allow, block
+    created_at = Column(DateTime, default=datetime.utcnow)
+    resolved_at = Column(DateTime, nullable=True)
+
+    user = relationship("User")
+    login_attempt = relationship("LoginAttempt")

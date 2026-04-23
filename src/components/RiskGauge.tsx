@@ -9,8 +9,8 @@ export default function RiskGauge({ risk, size = "lg" }: Props) {
   const circumference = 2 * Math.PI * r;
   const progress = (risk / 100) * circumference * 0.75; // 270 degree arc
   const color =
-    risk <= 30 ? "text-success" : risk <= 60 ? "text-warning" : "text-destructive";
-  const label = risk <= 30 ? "Low Risk" : risk <= 60 ? "Medium Risk" : "High Risk";
+    risk < 40 ? "text-success" : risk < 70 ? "text-warning" : "text-destructive";
+  const label = risk < 40 ? "Low Risk" : risk < 70 ? "Medium Risk" : "High Risk";
   const dim = (r + stroke) * 2;
 
   return (

@@ -1,23 +1,22 @@
-import pyotp
-from datetime import datetime, timedelta
 import secrets
-from app.config import settings
+import hashlib
 from typing import List
 
 class VerificationService:
     def __init__(self):
         self.otp_length = 6
 
-    def generate_otp_secret(self) -> str:
-        return pyotp.random_base32(length=settings.otp_secret_length)
+    def generate_otp(self) -> str:
+        digits = "0123456789"
+        return "".join(secrets.choice(digits) for _ in range(self.otp_length))
 
-    def generate_otp(self, secret: str) -> str:
-        totp = pyotp.TOTP(secret)
-        return totp.now()
+    def hash_otp(self, otp: str) -> str:
+        return hashlib.sha256(otp.encode()).hexdigest()
 
-    def verify_otp(self, secret: str, otp: str) -> bool:
-        totp = pyotp.TOTP(secret)
-        return totp.verify(otp)
+    def verify_otp(self, otp_hash: str, otp: str) -> bool:
+        if len(otp) != self.otp_length or not otp.isdigit():
+            return False
+        return secrets.compare_digest(otp_hash, self.hash_otp(otp))
 
     def generate_backup_codes(self, count: int = 10) -> List[str]:
         return [secrets.token_hex(4) for _ in range(count)]
