@@ -16,22 +16,9 @@ class AnomalyDetectionEngine:
         reasons = []
         attack_types = []
 
-        # Rule-based checks
-        behavior_risk, rule_reasons, failed_count = self._rule_based_checks(user_id, login_data, db)
+        # Rule engine: deterministic security checks get first say.
+        rule_risk, rule_reasons, failed_count = self._rule_based_checks(user_id, login_data, db)
         reasons.extend(rule_reasons)
-
-        # ML-based anomaly score
-        ml_features = self._extract_features(user_id, login_data, db)
-        ml_result = self.ml_model.predict_anomaly_score(ml_features)
-        ml_risk = ml_result["normalized_score"] * 100
-        if ml_result["is_anomalous"]:
-            contributor_labels = ", ".join(item["feature"] for item in ml_result["top_contributors"])
-            reasons.append(f"ML anomaly detected from {contributor_labels}")
-            attack_types.append("Behavioral Anomaly")
-
-        # Behavioral confidence
-        confidence_score = self.learning_system.calculate_confidence_score(user_id, login_data, db)
-        behavior_risk = min(100.0, max(behavior_risk, (1 - confidence_score) * 100))
 
         # Device trust
         device_trust = self._check_device_trust(user_id, login_data.get('device_fingerprint'), db)
@@ -47,16 +34,56 @@ class AnomalyDetectionEngine:
             if travel_speed > 1000:
                 attack_types.append("Impossible Travel")
 
-        if failed_count > 5:
+        if failed_count >= settings.max_failed_attempts:
             attack_types.append("Brute Force")
 
-        risk_score = (
-            0.4 * ml_risk +
-            0.2 * device_risk +
-            0.2 * travel_risk +
-            0.2 * behavior_risk
+        rule_risk = self._combine_rule_risk(rule_risk, device_risk, travel_risk)
+        rule_based_high_risk = self._is_rule_based_high_risk(
+            rule_risk=rule_risk,
+            failed_count=failed_count,
+            travel_speed=travel_speed,
         )
-        risk_score = min(100, max(0, risk_score))
+
+        if rule_based_high_risk:
+            risk_score = 100.0
+            decision = "block"
+            level = "HIGH"
+            confidence_score = 0.0
+            explanation = self._build_explanation(reasons, attack_types, risk_score, confidence_score)
+            return {
+                "risk_score": risk_score,
+                "level": level,
+                "anomaly_score": 0.0,
+                "ml_raw_score": 0.0,
+                "confidence_score": confidence_score,
+                "decision": decision,
+                "reasons": reasons,
+                "attack_types": sorted(set(attack_types)),
+                "attack_type": self._primary_attack_type(attack_types),
+                "explanation": explanation,
+                "risk_components": {
+                    "rule_risk": round(rule_risk, 2),
+                    "ml_risk": 0.0,
+                    "device_risk": round(device_risk, 2),
+                    "travel_risk": round(travel_risk, 2),
+                    "behavior_risk": 0.0,
+                },
+            }
+
+        # ML-based anomaly score
+        ml_features = self._extract_features(user_id, login_data, db)
+        ml_result = self.ml_model.predict_anomaly_score(ml_features)
+        ml_risk = ml_result["normalized_score"] * 100
+        if ml_result["is_anomalous"]:
+            contributor_labels = ", ".join(item["feature"] for item in ml_result["top_contributors"])
+            reasons.append(f"ML anomaly detected from {contributor_labels}")
+            attack_types.append("Behavioral Anomaly")
+
+        # Behavioral confidence
+        confidence_score = self.learning_system.calculate_confidence_score(user_id, login_data, db)
+        behavior_risk = (1 - confidence_score) * 100
+
+        risk_score = self._combine_final_risk(rule_risk, ml_risk, behavior_risk)
 
         decision = self._make_decision(risk_score)
         level = self._risk_level(risk_score)
@@ -74,6 +101,7 @@ class AnomalyDetectionEngine:
             "attack_type": self._primary_attack_type(attack_types),
             "explanation": explanation,
             "risk_components": {
+                "rule_risk": round(rule_risk, 2),
                 "ml_risk": round(ml_risk, 2),
                 "device_risk": round(device_risk, 2),
                 "travel_risk": round(travel_risk, 2),
@@ -103,6 +131,32 @@ class AnomalyDetectionEngine:
             reasons.append("Unusual login time")
 
         return min(100, risk_score), reasons, failed_count
+
+    def _combine_rule_risk(self, behavior_rule_risk: float, device_risk: float, travel_risk: float) -> float:
+        return min(
+            100.0,
+            max(
+                behavior_rule_risk,
+                device_risk * 0.6,
+                travel_risk,
+                behavior_rule_risk + (device_risk * 0.2) + (travel_risk * 0.3),
+            ),
+        )
+
+    def _is_rule_based_high_risk(self, rule_risk: float, failed_count: int, travel_speed: float) -> bool:
+        if failed_count >= settings.max_failed_attempts:
+            return True
+        if travel_speed >= settings.travel_velocity_threshold * 2:
+            return True
+        return rule_risk >= 95
+
+    def _combine_final_risk(self, rule_risk: float, ml_risk: float, behavior_risk: float) -> float:
+        final_score = (
+            0.45 * rule_risk +
+            0.35 * ml_risk +
+            0.20 * behavior_risk
+        )
+        return min(100.0, max(0.0, final_score))
 
     def _extract_features(self, user_id: int, login_data: Dict[str, Any], db: Session) -> Dict[str, Any]:
         timestamp = login_data.get('timestamp', datetime.utcnow())
