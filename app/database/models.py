@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Float, Boolean, Text, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, Float, Boolean, Text, ForeignKey, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -10,8 +10,11 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String, unique=True, index=True)
+    email = Column(String, nullable=True, unique=True)
+    phone = Column(String, nullable=True)
     hashed_password = Column(String)
     is_locked = Column(Boolean, default=False)
+    locked_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -42,10 +45,11 @@ class UserProfile(Base):
 
 class Device(Base):
     __tablename__ = "devices"
+    __table_args__ = (UniqueConstraint("user_id", "fingerprint", name="uq_device_user_fingerprint"),)
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
-    fingerprint = Column(String, unique=True, index=True)
+    fingerprint = Column(String, index=True)
     is_trusted = Column(Boolean, default=False)
     first_seen = Column(DateTime, default=datetime.utcnow)
     last_seen = Column(DateTime, default=datetime.utcnow)

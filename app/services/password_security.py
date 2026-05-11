@@ -14,55 +14,50 @@ class PasswordSecurityEngine:
 
     def validate_password(self, password: str) -> Dict[str, Any]:
         score = 0
-        suggestions = []
+        feedback = []
 
-        # Length check
-        if len(password) >= self.min_length:
-            score += 20
-        else:
-            suggestions.append(f"Password must be at least {self.min_length} characters long")
+        length_ok = len(password) >= self.min_length
+        if not length_ok:
+            feedback.append(f"Password must be at least {self.min_length} characters long")
 
-        # Uppercase check
         if re.search(r'[A-Z]', password):
-            score += 20
+            score += 1
         else:
-            suggestions.append("Include at least one uppercase letter")
+            feedback.append("Include at least one uppercase letter")
 
-        # Lowercase check
         if re.search(r'[a-z]', password):
-            score += 20
+            score += 1
         else:
-            suggestions.append("Include at least one lowercase letter")
+            feedback.append("Include at least one lowercase letter")
 
-        # Digits check
         if re.search(r'\d', password):
-            score += 20
+            score += 1
         else:
-            suggestions.append("Include at least one digit")
+            feedback.append("Include at least one digit")
 
-        # Symbols check
         if re.search(r'[!@#$%^&*(),.?":{}|<>]', password):
-            score += 20
+            score += 1
         else:
-            suggestions.append("Include at least one special character")
+            feedback.append("Include at least one special character")
 
-        # Check blacklist
         db = SessionLocal()
         try:
             hashed = hash_string(password.lower())
             blacklist_entry = db.query(PasswordBlacklist).filter(PasswordBlacklist.password_hash == hashed).first()
             if blacklist_entry:
                 score = 0
-                suggestions = ["Password is in the common passwords blacklist"]
+                feedback = ["Password is in the common passwords blacklist"]
         finally:
             db.close()
 
-        is_valid = score >= 80 and not suggestions
+        is_valid = length_ok and score == 4 and not feedback
 
         return {
             "is_valid": is_valid,
-            "strength_score": score,
-            "suggestions": suggestions
+            "score": score,
+            "feedback": feedback,
+            "strength_score": score * 25 if length_ok else min(score * 25, 75),
+            "suggestions": feedback,
         }
 
     def add_to_blacklist(self, password: str):

@@ -22,45 +22,69 @@ class BehavioralLearningSystem:
             profile = UserProfile(user_id=user_id)
             db.add(profile)
 
-        # Get recent successful logins
-        recent_logins = db.query(LoginAttempt).filter(
+        successful_count = db.query(LoginAttempt).filter(
             LoginAttempt.user_id == user_id,
             LoginAttempt.success == True,
-            LoginAttempt.timestamp >= datetime.utcnow() - timedelta(days=30)
-        ).all()
+        ).count()
+        sample_count = max(1, successful_count)
 
-        if len(recent_logins) >= 5:
-            # Update login times
-            login_hours = [la.timestamp.hour + la.timestamp.minute / 60 for la in recent_logins]
-            profile.login_time_mean = mean(login_hours)
-            profile.login_time_std = stdev(login_hours) if len(login_hours) > 1 else 0
+        timestamp = login_data.get("timestamp", datetime.utcnow())
+        login_hour = timestamp.hour + timestamp.minute / 60
+        profile.login_time_mean, profile.login_time_std = self._welford_update(
+            profile.login_time_mean,
+            profile.login_time_std,
+            sample_count,
+            login_hour,
+        )
 
-            # Update locations
-            locations = [(la.location_lat, la.location_lon) for la in recent_logins if la.location_lat and la.location_lon]
-            if locations:
-                lats, lons = zip(*locations)
-                profile.location_lat_mean = mean(lats)
-                profile.location_lon_mean = mean(lons)
-                profile.location_std = stdev(lats + lons) / 2 if len(lats) > 1 else 0
+        if login_data.get("location_lat") is not None and login_data.get("location_lon") is not None:
+            profile.location_lat_mean, profile.location_std = self._welford_update(
+                profile.location_lat_mean,
+                profile.location_std,
+                sample_count,
+                float(login_data["location_lat"]),
+            )
+            profile.location_lon_mean, _ = self._welford_update(
+                profile.location_lon_mean,
+                profile.location_std,
+                sample_count,
+                float(login_data["location_lon"]),
+            )
 
-            # Update typing speed
-            typing_speeds = [la.typing_speed for la in recent_logins if la.typing_speed]
-            if typing_speeds:
-                profile.typing_speed_mean = mean(typing_speeds)
-                profile.typing_speed_std = stdev(typing_speeds) if len(typing_speeds) > 1 else 0
+        if login_data.get("typing_speed") is not None:
+            profile.typing_speed_mean, profile.typing_speed_std = self._welford_update(
+                profile.typing_speed_mean,
+                profile.typing_speed_std,
+                sample_count,
+                float(login_data["typing_speed"]),
+            )
 
-            # Update keystroke rhythm (simplified)
-            keystrokes = [json.loads(la.keystroke_timing) for la in recent_logins if la.keystroke_timing]
-            if keystrokes:
-                avg_keystroke = [mean(k) for k in zip(*keystrokes)]
-                profile.keystroke_rhythm = json.dumps(avg_keystroke)
+        if login_data.get("keystroke_timing"):
+            profile.keystroke_rhythm = login_data["keystroke_timing"]
 
-            # Check if learning mode should end
-            first_login = min(la.timestamp for la in recent_logins)
-            if datetime.utcnow() - first_login > timedelta(days=self.learning_period_days):
-                profile.learning_mode = False
+        if successful_count >= 10:
+            profile.learning_mode = False
 
         db.commit()
+
+    def _welford_update(
+        self,
+        current_mean: float | None,
+        current_std: float | None,
+        sample_count: int,
+        value: float,
+    ) -> tuple[float, float]:
+        if sample_count <= 1 or current_mean is None:
+            return value, 0.0
+
+        previous_count = sample_count - 1
+        previous_m2 = (current_std or 0.0) ** 2 * max(previous_count - 1, 0)
+        delta = value - current_mean
+        new_mean = current_mean + delta / sample_count
+        delta2 = value - new_mean
+        new_m2 = previous_m2 + delta * delta2
+        new_variance = new_m2 / max(sample_count - 1, 1)
+        return new_mean, new_variance ** 0.5
 
     def calculate_confidence_score(self, user_id: int, login_data: Dict[str, Any], db: Session) -> float:
         profile = db.query(UserProfile).filter(UserProfile.user_id == user_id).first()

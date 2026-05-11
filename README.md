@@ -47,43 +47,130 @@ The checked-in `.env.example` also includes PostgreSQL settings for use with `do
 
 ## Backend Setup
 
-Create and activate a virtual environment, then install Python dependencies:
+Use one PowerShell terminal for the backend.
 
-```bash
+Go to the project folder:
+
+```powershell
+cd "C:\Users\apeks\Desktop\apeksha\projects\bph technologies\login-anomaly-detection\login-anamoly-detection"
+```
+
+Create a Python virtual environment:
+
+```powershell
 python -m venv .venv
-.venv\Scripts\activate
+```
+
+Allow PowerShell to activate the virtual environment for this terminal session:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
+```
+
+Activate the virtual environment:
+
+```powershell
+& ".\.venv\Scripts\Activate.ps1"
+```
+
+Install backend dependencies:
+
+```powershell
+python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
 Start the API server:
 
-```bash
+```powershell
 uvicorn app.main:app --reload
 ```
 
-The API runs at `http://127.0.0.1:8000`.
+The backend API runs at:
+
+```text
+http://127.0.0.1:8000
+```
 
 Useful backend URLs:
 
-- `GET /health`
-- `GET /docs`
-- `GET /redoc`
+- API root: `http://127.0.0.1:8000/`
+- Health check: `http://127.0.0.1:8000/health`
+- Swagger docs: `http://127.0.0.1:8000/docs`
+- ReDoc: `http://127.0.0.1:8000/redoc`
 
 ## Frontend Setup
 
-Install dependencies:
+Use a second PowerShell terminal for the frontend. Keep the backend terminal running.
 
-```bash
-npm install
+Go to the project folder:
+
+```powershell
+cd "C:\Users\apeks\Desktop\apeksha\projects\bph technologies\login-anomaly-detection\login-anamoly-detection"
 ```
+
+Install frontend dependencies:
+
+```powershell
+npm install --legacy-peer-deps
+```
+
+`--legacy-peer-deps` is needed because this project uses React 19 while `next-themes@0.3.0` declares support for React 16/17/18. This command lets npm install the dependency tree without failing on that peer dependency warning.
 
 Start the Vite dev server:
 
-```bash
+```powershell
 npm run dev
 ```
 
-The frontend runs at `http://localhost:8080` and proxies `/api` requests to `http://127.0.0.1:8000`.
+The frontend runs at the URL printed by Vite, usually:
+
+```text
+http://localhost:8080
+```
+
+If Vite prints a different port, such as `http://localhost:5173`, open that URL instead.
+
+The frontend sends backend API requests to:
+
+```text
+http://127.0.0.1:8000
+```
+
+## Run Order
+
+Start the backend first:
+
+```powershell
+cd "C:\Users\apeks\Desktop\apeksha\projects\bph technologies\login-anomaly-detection\login-anamoly-detection"
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
+& ".\.venv\Scripts\Activate.ps1"
+uvicorn app.main:app --reload
+```
+
+Then start the frontend in a second terminal:
+
+```powershell
+cd "C:\Users\apeks\Desktop\apeksha\projects\bph technologies\login-anomaly-detection\login-anamoly-detection"
+npm install --legacy-peer-deps
+npm run dev
+```
+
+Use these URLs:
+
+```text
+Frontend app: http://localhost:8080
+Backend API:  http://127.0.0.1:8000
+API docs:     http://127.0.0.1:8000/docs
+```
+
+If `http://127.0.0.1:8000/` shows this, the backend is working:
+
+```json
+{"message":"Universal Login Security Middleware API"}
+```
+
+That JSON page is not the frontend. Open the Vite frontend URL for the dashboard UI.
 
 ## Docker Services
 
@@ -97,12 +184,13 @@ Then set `DATABASE_URL` and `REDIS_URL` in `.env` to match the values in `docker
 
 ## Common Commands
 
-```bash
-npm run dev          # Start frontend development server
-npm run build        # Build frontend for production
-npm run lint         # Run ESLint
-npm run test         # Run frontend tests
-uvicorn app.main:app --reload
+```powershell
+npm install --legacy-peer-deps      # Install frontend dependencies
+npm run dev                         # Start frontend development server
+npm run build                       # Build frontend for production
+npm run lint                        # Run ESLint
+npm run test                        # Run frontend tests
+uvicorn app.main:app --reload       # Start backend API server
 ```
 
 ## API Overview

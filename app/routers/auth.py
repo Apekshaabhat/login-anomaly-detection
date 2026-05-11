@@ -1,8 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Request
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field, IPvAnyAddress, ConfigDict, model_validator
 from typing import Optional, List, Dict, Any
 from datetime import datetime
+from datetime import timedelta
+from jose import jwt as jose_jwt
 from app.database.connection import get_db, SessionLocal
 from app.database.models import User, LoginAttempt, Device
 from app.schemas.analytics import AnalyzeRequest, AnalyzeResponse
@@ -33,6 +35,8 @@ class PasswordValidationRequest(BaseModel):
 class UserRegistrationRequest(BaseModel):
     username: str
     password: str
+    email: Optional[str] = None
+    phone: Optional[str] = None
 
 class LoginRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
@@ -69,6 +73,7 @@ class LoginDecision(BaseModel):
     attack_type: Optional[str] = None
     verification_token: Optional[str] = None
     debug_otp: Optional[str] = None
+    access_token: Optional[str] = None
 
 class VerificationRequest(BaseModel):
     username: str
@@ -83,6 +88,10 @@ class FeedbackRequest(BaseModel):
     login_attempt_id: int
     is_false_positive: bool
     admin_token: str
+
+def create_access_token(user_id: int) -> str:
+    expire = datetime.utcnow() + timedelta(minutes=settings.access_token_expire_minutes)
+    return jose_jwt.encode({"sub": str(user_id), "exp": expire}, settings.secret_key, algorithm=settings.algorithm)
 
 @router.post("/validate-password", response_model=dict)
 def validate_password(request: PasswordValidationRequest):
@@ -103,7 +112,12 @@ def register_user(request: UserRegistrationRequest, db: Session = Depends(get_db
 
     # Create user
     hashed_password = hash_password(request.password)
-    user = User(username=request.username, hashed_password=hashed_password)
+    user = User(
+        username=request.username,
+        email=request.email,
+        phone=request.phone,
+        hashed_password=hashed_password,
+    )
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -131,6 +145,7 @@ def _format_analysis_response(
     decision: Optional[str] = None,
     verification_token: Optional[str] = None,
     debug_otp: Optional[str] = None,
+    access_token: Optional[str] = None,
 ) -> Dict[str, Any]:
     attack_type = anomaly_result.get("attack_type") or "None"
     return {
@@ -142,6 +157,7 @@ def _format_analysis_response(
         "decision": decision or anomaly_result.get("decision"),
         "verification_token": verification_token,
         "debug_otp": debug_otp,
+        "access_token": access_token,
         "attack_types": anomaly_result.get("attack_types", []),
     }
 
@@ -170,7 +186,12 @@ def analyze_login(request: AnalyzeRequest, db: Session = Depends(get_db)):
     return _format_analysis_response(anomaly_result)
 
 @router.post("/login", response_model=LoginDecision)
-def login(request: LoginRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+def login(
+    request: LoginRequest,
+    http_request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
     request_ip = str(request.ip_address)
 
     # Rate limiting
@@ -182,9 +203,18 @@ def login(request: LoginRequest, background_tasks: BackgroundTasks, db: Session 
     cache_store.incr(rate_limit_key)
     cache_store.expire(rate_limit_key, settings.rate_limit_window_seconds)
 
+    user_rate_key = f"login_user:{request.username}"
+    user_attempts = cache_store.get(user_rate_key)
+    if user_attempts and int(user_attempts) >= settings.rate_limit_requests:
+        raise HTTPException(status_code=429, detail="Too many login attempts for this account")
+
+    cache_store.incr(user_rate_key)
+    cache_store.expire(user_rate_key, settings.rate_limit_window_seconds)
+
     # Find user
     user = db.query(User).filter(User.username == request.username).first()
     if not user:
+        verify_password(request.password, "$2b$12$placeholder_hash_to_waste_time")
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     # Check if account is locked
@@ -240,6 +270,8 @@ def login(request: LoginRequest, background_tasks: BackgroundTasks, db: Session 
                 "issued_at": datetime.utcnow().isoformat(),
             },
         )
+        destination = user.email or user.phone or request.username
+        verification_service.send_otp(otp_code, destination, "email" if user.email else "sms")
     else:
         decision = "allow"
 
@@ -262,6 +294,21 @@ def login(request: LoginRequest, background_tasks: BackgroundTasks, db: Session 
     )
     db.add(login_attempt)
     db.commit()
+    db.refresh(login_attempt)
+
+    if http_request is not None and hasattr(http_request.app.state, "broadcast_event"):
+        event = {
+            "type": "login_attempt",
+            "user": request.username,
+            "ip": request_ip,
+            "risk_score": anomaly_result["risk_score"],
+            "decision": decision,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+        try:
+            background_tasks.add_task(http_request.app.state.broadcast_event, event)
+        except Exception:
+            pass
 
     # Update device trust
     device = db.query(Device).filter(Device.user_id == user.id, Device.fingerprint == request.device_fingerprint).first()
@@ -300,6 +347,7 @@ def login(request: LoginRequest, background_tasks: BackgroundTasks, db: Session 
         **_format_analysis_response(
             anomaly_result,
             decision=decision,
+            access_token=create_access_token(user.id) if success and decision == "allow" else None,
         )
     )
     if decision == "require_verification":
@@ -345,12 +393,12 @@ def verify_login(request: VerificationRequest, db: Session = Depends(get_db)):
         ip_address=None,
     )
 
-    return {"message": "Login verified successfully"}
+    return {"message": "Login verified successfully", "access_token": create_access_token(user_id)}
 
 @router.post("/admin/unlock", response_model=dict)
 def admin_unlock(request: AdminUnlockRequest, db: Session = Depends(get_db)):
     # Simplified admin check
-    if request.admin_token != "admin_secret":
+    if request.admin_token != settings.admin_secret_token:
         raise HTTPException(status_code=403, detail="Invalid admin token")
 
     lock_service.unlock_account(request.user_id, db, admin_user_id=0)  # Assume admin id 0
@@ -358,15 +406,27 @@ def admin_unlock(request: AdminUnlockRequest, db: Session = Depends(get_db)):
     return {"message": "Account unlocked successfully"}
 
 @router.post("/feedback", response_model=dict)
-def submit_feedback(request: FeedbackRequest, db: Session = Depends(get_db)):
+def submit_feedback(request: FeedbackRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     # Simplified admin check
-    if request.admin_token != "admin_secret":
+    if request.admin_token != settings.admin_secret_token:
         raise HTTPException(status_code=403, detail="Invalid admin token")
 
     # Update the login attempt with feedback
     attempt = db.query(LoginAttempt).filter(LoginAttempt.id == request.login_attempt_id).first()
-    if attempt:
-        # In real implementation, use feedback to retrain model
-        pass
+    if not attempt:
+        raise HTTPException(status_code=404, detail="Login attempt not found")
+
+    if request.is_false_positive:
+        attempt.risk_score = max(0.0, (attempt.risk_score or 0.0) - 30)
+        attempt.decision = "allow"
+        db.commit()
+        adjusted_attempts = db.query(LoginAttempt).filter(
+            LoginAttempt.decision == "allow",
+            LoginAttempt.risk_score <= 40,
+        ).count()
+        if adjusted_attempts >= 5:
+            background_tasks.add_task(_auto_retrain_model)
+    else:
+        db.commit()
 
     return {"message": "Feedback submitted successfully"}

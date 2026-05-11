@@ -12,6 +12,7 @@ from app.schemas.analytics import BehaviorResponse, BehaviorTrendPoint, Behavior
 from app.services.logging_service import LoggingService
 from app.services.anomaly_detection import AnomalyDetectionEngine
 from app.services.account_lock import AccountLockService
+from app.config import settings
 
 router = APIRouter()
 logging_service = LoggingService()
@@ -115,7 +116,7 @@ def get_alerts(limit: int = 100, db: Session = Depends(get_db)):
 
 @router.post("/alerts/{alert_id}/resolve", response_model=dict)
 def resolve_alert(alert_id: int, request: AdminActionRequest, db: Session = Depends(get_db)):
-    if request.admin_token != "admin_secret":
+    if request.admin_token != settings.admin_secret_token:
         raise HTTPException(status_code=403, detail="Invalid admin token")
 
     alert = db.query(AlertRecord).filter(AlertRecord.id == alert_id).first()
@@ -130,7 +131,7 @@ def resolve_alert(alert_id: int, request: AdminActionRequest, db: Session = Depe
 
 @router.post("/alerts/{alert_id}/block", response_model=dict)
 def block_from_alert(alert_id: int, request: AdminActionRequest, db: Session = Depends(get_db)):
-    if request.admin_token != "admin_secret":
+    if request.admin_token != settings.admin_secret_token:
         raise HTTPException(status_code=403, detail="Invalid admin token")
 
     alert = db.query(AlertRecord).filter(AlertRecord.id == alert_id).first()
@@ -173,7 +174,7 @@ def get_dashboard(limit: int = 100, db: Session = Depends(get_db)):
 
     grouped_scores = defaultdict(list)
     for attempt in reversed(attempts):
-        grouped_scores[attempt.timestamp.strftime("%H:%M")].append(attempt.risk_score or 0)
+        grouped_scores[attempt.timestamp.strftime("%m-%d %H:%M")].append(attempt.risk_score or 0)
 
     timeline = []
     all_scores = [attempt.risk_score or 0 for attempt in attempts]
@@ -292,7 +293,7 @@ def get_behavior(username: str, db: Session = Depends(get_db)):
 
 @router.post("/retrain-model", response_model=dict)
 def retrain_model(request: RetrainRequest, db: Session = Depends(get_db)):
-    if request.admin_token != "admin_secret":
+    if request.admin_token != settings.admin_secret_token:
         raise HTTPException(status_code=403, detail="Invalid admin token")
     model_trained = anomaly_engine.retrain_from_login_attempts(db)
     if not model_trained:
@@ -305,7 +306,7 @@ def retrain_model(request: RetrainRequest, db: Session = Depends(get_db)):
 
 @router.post("/add-blacklist", response_model=dict)
 def add_to_blacklist(request: AddBlacklistRequest, db: Session = Depends(get_db)):
-    if request.admin_token != "admin_secret":
+    if request.admin_token != settings.admin_secret_token:
         raise HTTPException(status_code=403, detail="Invalid admin token")
 
     from app.services.password_security import PasswordSecurityEngine

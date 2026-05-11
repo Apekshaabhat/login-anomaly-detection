@@ -23,6 +23,7 @@ class AccountLockService:
         user = db.query(User).filter(User.id == user_id).first()
         if user:
             user.is_locked = True
+            user.locked_at = datetime.utcnow()
             db.commit()
 
             # Log the action
@@ -39,6 +40,7 @@ class AccountLockService:
         user = db.query(User).filter(User.id == user_id).first()
         if user:
             user.is_locked = False
+            user.locked_at = None
             db.commit()
 
             # Log the action
@@ -53,4 +55,11 @@ class AccountLockService:
 
     def is_account_locked(self, user_id: int, db: Session) -> bool:
         user = db.query(User).filter(User.id == user_id).first()
-        return user.is_locked if user else False
+        if not user or not user.is_locked:
+            return False
+        if user.locked_at and datetime.utcnow() - user.locked_at >= self.lockout_duration:
+            user.is_locked = False
+            user.locked_at = None
+            db.commit()
+            return False
+        return True

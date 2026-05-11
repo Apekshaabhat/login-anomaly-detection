@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379"
     secret_key: str = "your-secret-key-here"
     algorithm: str = "HS256"
+    admin_secret_token: str = "change-this-admin-token"
     access_token_expire_minutes: int = 30
     learning_mode_days: int = 7
     max_failed_attempts: int = 5

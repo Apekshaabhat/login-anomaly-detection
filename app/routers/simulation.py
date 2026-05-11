@@ -6,7 +6,6 @@ from app.database.connection import get_db
 from app.routers.auth import login, LoginRequest
 from app.services.live_simulation import LiveSimulationService
 import random
-import time
 
 router = APIRouter()
 live_simulation_service = LiveSimulationService()
@@ -39,7 +38,7 @@ def simulate_brute_force(request: BruteForceSimulationRequest, db: Session = Dep
             keystroke_timing=[random.uniform(0.1, 0.5) for _ in range(len(password))]
         )
         try:
-            result = login(login_req, background_tasks, db)
+            result = login(login_req, None, background_tasks, db=db)
             results.append({
                 "password": password,
                 "decision": result.decision,
@@ -51,7 +50,6 @@ def simulate_brute_force(request: BruteForceSimulationRequest, db: Session = Dep
                 "password": password,
                 "error": str(e)
             })
-        time.sleep(0.1)
     return results
 
 @router.post("/simulate-anomaly", response_model=Dict[str, Any])
@@ -82,7 +80,7 @@ def simulate_anomaly(request: AnomalySimulationRequest, db: Session = Depends(ge
         login_req.keystroke_timing = [1.0] * len(request.password)
 
     try:
-        result = login(login_req, background_tasks, db)
+        result = login(login_req, None, background_tasks, db=db)
         return {
             "anomaly_type": request.anomaly_type,
             "decision": result.decision,
