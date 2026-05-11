@@ -59,6 +59,7 @@ class ModelMonitoringService:
         if last_trained_at is not None and len(recent_attempts) < 20:
             return {
                 "drift_detected": False,
+                "drift_level": "low",
                 "drift_score": 0.0,
                 "affected_features": [],
                 "sample_size": len(recent_attempts),
@@ -82,9 +83,12 @@ class ModelMonitoringService:
                 baseline_feature["histogram"],
                 production_feature["histogram"],
             )
-            # PSI and KL are not percentages; cap the combined health score so one sparse bin
-            # cannot dominate the UI with impossible-looking values.
-            score = min(1.0, max(psi, min(1.0, kl)))
+            # PSI is the primary drift signal because it is interpretable for feature
+            # distribution monitoring. KL is kept as a small normalized secondary
+            # signal for extra sensitivity without saturating the score instantly.
+            normalized_psi = min(1.0, psi)
+            normalized_kl = math.tanh(kl / 5)
+            score = (normalized_psi * 0.8) + (normalized_kl * 0.2)
             feature_scores.append(score)
             if score >= settings.drift_threshold:
                 affected_features.append({
@@ -94,9 +98,13 @@ class ModelMonitoringService:
                     "kl_divergence": round(kl, 4),
                 })
 
-        drift_score = max(feature_scores) if feature_scores else 0.0
+        # Use the mean across features so a single noisy feature does not mark the
+        # entire model as drifted by itself.
+        drift_score = float(np.mean(feature_scores)) if feature_scores else 0.0
+        drift_level = self._drift_level(drift_score)
         return {
             "drift_detected": drift_score >= settings.drift_threshold,
+            "drift_level": drift_level,
             "drift_score": round(float(drift_score), 4),
             "affected_features": affected_features,
             "sample_size": len(recent_attempts),
@@ -370,6 +378,15 @@ class ModelMonitoringService:
             if feature_summary and not feature_summary.get("bin_edges"):
                 return False
         return True
+
+    def _drift_level(self, score: float) -> str:
+        if score < 0.2:
+            return "low"
+        if score < 0.5:
+            return "moderate"
+        if score < 0.75:
+            return "high"
+        return "critical"
 
     def _population_stability_index(self, expected: List[float], actual: List[float]) -> float:
         expected_arr = np.array(expected, dtype=float) + 1e-6

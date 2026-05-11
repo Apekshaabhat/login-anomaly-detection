@@ -130,6 +130,7 @@ export interface ModelConfusionMatrixResponse {
 
 export interface ModelDriftResponse {
   drift_detected: boolean;
+  drift_level?: "low" | "moderate" | "high" | "critical";
   drift_score: number;
   affected_features: Array<{
     feature: string;

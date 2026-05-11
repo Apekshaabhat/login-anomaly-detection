@@ -331,13 +331,85 @@ The backend marks drift as detected when the highest feature drift score is grea
 Drift scores are PSI/KL-style raw scores, not accuracy percentages. A score above `0.2` usually means meaningful drift.
 Production histograms are compared against the same baseline bin edges captured during retraining, so retraining resets the baseline consistently.
 
+Drift score calculation:
+
+```text
+normalized_psi = min(1.0, psi)
+normalized_kl = tanh(kl / 5)
+feature_score = (normalized_psi * 0.8) + (normalized_kl * 0.2)
+drift_score = mean(feature_scores)
+```
+
+This makes PSI the primary signal, keeps KL for monitoring/debugging, and avoids one noisy feature forcing the whole model into drift.
+
+## Recommended Future Security Integrations
+
+These integrations are not required for local development and are intentionally not added as dependencies yet.
+
+IP reputation:
+
+- AbuseIPDB for abuse confidence score, report count, and blacklist checks
+- IPQualityScore for fraud score, VPN/proxy/TOR/bot detection
+
+Use these to enrich:
+
+```text
+ip_risk_score
+attack_type
+login reasons
+```
+
+GeoIP:
+
+- ipinfo.io for city, region, ASN, ISP, and coordinates
+
+Use this to improve:
+
+```text
+geo_distance_from_last_login
+impossible travel detection
+country/ASN anomaly scoring
+```
+
+Device fingerprinting:
+
+- FingerprintJS for stable browser/device identifiers
+
+Use this to improve:
+
+```text
+trusted devices
+new device detection
+account takeover detection
+```
+
+Threat intelligence:
+
+- VirusTotal for known malicious IPs/domains/URLs
+
+Observability:
+
+- Sentry for frontend/backend exception monitoring
+- PostHog for analytics and model event dashboards
+
 Default config:
 
 ```env
-DRIFT_THRESHOLD=0.2
+DRIFT_THRESHOLD=0.7
 MODEL_METADATA_PATH=app/ml/model_metadata.json
 MODEL_MONITORING_LOG_PATH=app/ml/model_predictions.jsonl
 ```
+
+Drift levels:
+
+```text
+< 0.2      stable / low
+0.2-0.5    moderate
+0.5-0.75   high
+> 0.75     critical
+```
+
+The frontend shows moderate drift as an informational variation and only strongly recommends retraining for significant drift.
 
 ## Retraining Flow
 

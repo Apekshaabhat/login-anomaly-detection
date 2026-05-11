@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
@@ -45,6 +45,7 @@ export default function ModelPage() {
   const queryClient = useQueryClient();
   const [progress, setProgress] = useState(0);
   const [selectedVersion, setSelectedVersion] = useState<string>("");
+  const retrainToastIdRef = useRef<string | number | null>(null);
 
   const statusQuery = useQuery({
     queryKey: ["model-status"],
@@ -96,19 +97,26 @@ export default function ModelPage() {
     mutationFn: retrainModel,
     onMutate: () => {
       setProgress(8);
-      toast.info("Model retraining started");
+      const toastId = toast.loading("Retraining model...");
+      retrainToastIdRef.current = toastId;
     },
     onSuccess: (result) => {
       setProgress(100);
-      toast.success(`Retrained model ${result.new_version}`);
+      toast.success(`Retrained model ${result.new_version}`, { id: retrainToastIdRef.current ?? undefined });
+      retrainToastIdRef.current = null;
       queryClient.invalidateQueries({ queryKey: ["model-status"] });
       queryClient.invalidateQueries({ queryKey: ["model-drift"] });
       queryClient.invalidateQueries({ queryKey: ["model-history"] });
       queryClient.invalidateQueries({ queryKey: ["model-monitoring"] });
+      queryClient.invalidateQueries({ queryKey: ["model-confusion-matrix"] });
+      queryClient.invalidateQueries({ queryKey: ["model-registry"] });
     },
     onError: (error) => {
       setProgress(0);
-      toast.error(error instanceof Error ? error.message : "Model retraining failed");
+      toast.error(error instanceof Error ? error.message : "Model retraining failed", {
+        id: retrainToastIdRef.current ?? undefined,
+      });
+      retrainToastIdRef.current = null;
     },
   });
 
@@ -127,18 +135,34 @@ export default function ModelPage() {
     return Math.min(95, Math.max(progress, 45));
   }, [progress, retraining]);
 
-  const hasError = statusQuery.isError || driftQuery.isError || monitoringQuery.isError;
+  const criticalFailure = statusQuery.isError && driftQuery.isError && monitoringQuery.isError;
+  const partialFailures = [
+    statusQuery.isError ? "status" : null,
+    driftQuery.isError ? "drift" : null,
+    monitoringQuery.isError ? "monitoring" : null,
+    explainQuery.isError ? "explainability" : null,
+    confusionMatrixQuery.isError ? "confusion matrix" : null,
+    historyQuery.isError ? "history" : null,
+    registryQuery.isError ? "registry" : null,
+  ].filter(Boolean);
 
   const handleRetrain = () => {
     setProgress(0);
     retrainMutation.mutate();
   };
 
-  const handleRetry = () => {
-    statusQuery.refetch();
-    driftQuery.refetch();
-    monitoringQuery.refetch();
-    explainQuery.refetch();
+  const handleRetry = async () => {
+    toast.info("Retrying model services...");
+    await Promise.all([
+      statusQuery.refetch(),
+      driftQuery.refetch(),
+      monitoringQuery.refetch(),
+      explainQuery.refetch(),
+      confusionMatrixQuery.refetch(),
+      historyQuery.refetch(),
+      registryQuery.refetch(),
+    ]);
+    toast.success("Model data refreshed");
   };
 
   return (
@@ -167,7 +191,7 @@ export default function ModelPage() {
         </div>
       </div>
 
-      {hasError && (
+      {criticalFailure && (
         <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive animate-fade-in">
           <AlertTriangle className="w-5 h-5 shrink-0" />
           <div>
@@ -177,7 +201,19 @@ export default function ModelPage() {
         </div>
       )}
 
-      {drift?.drift_detected && <DriftWarning drift={drift} />}
+      {!criticalFailure && partialFailures.length > 0 && (
+        <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-warning/10 border border-warning/20 text-warning animate-fade-in">
+          <AlertTriangle className="w-5 h-5 shrink-0" />
+          <div>
+            <p className="text-sm font-semibold">Some model panels are using cached or fallback data</p>
+            <p className="text-xs text-muted-foreground">
+              Failed services: {partialFailures.join(", ")}.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {drift && drift.drift_score >= 0.2 && <DriftWarning drift={drift} />}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <MetricCard icon={Clock} label="Last Trained" value={formatDate(model?.last_trained)} loading={statusQuery.isLoading} />
@@ -328,13 +364,22 @@ export default function ModelPage() {
 }
 
 function DriftWarning({ drift }: { drift: ModelDriftResponse }) {
+  const level = drift.drift_level ?? (drift.drift_score >= 0.75 ? "critical" : drift.drift_score >= 0.5 ? "high" : "moderate");
+  const isSignificant = level === "critical" || drift.drift_score >= 0.75;
+  const title = isSignificant ? "Significant behavior deviation detected" : "Moderate behavior variation observed";
+  const message = isSignificant
+    ? "Model retraining is recommended."
+    : "No immediate action is required; keep monitoring new login behavior.";
+  const tone = isSignificant
+    ? "bg-warning/10 border-warning/20 text-warning"
+    : "bg-primary/10 border-primary/20 text-primary";
   return (
-    <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-warning/10 border border-warning/20 text-warning animate-fade-in">
+    <div className={`flex items-center gap-3 px-4 py-3 rounded-xl border animate-fade-in ${tone}`}>
       <AlertTriangle className="w-5 h-5 shrink-0" />
       <div>
-        <p className="text-sm font-semibold">Behavior Deviation Detected</p>
+        <p className="text-sm font-semibold">{title}</p>
         <p className="text-xs text-muted-foreground">
-          Drift score: {drift.drift_score.toFixed(3)}. Model retraining is recommended.
+          Drift score: {drift.drift_score.toFixed(3)} ({level}). {message}
         </p>
       </div>
     </div>
