@@ -32,6 +32,8 @@ __pycache__/
 *.sqlite3
 *.pkl
 *.joblib
+app/ml/model_metadata.json
+app/ml/model_predictions.jsonl
 
 # Logs
 logs/

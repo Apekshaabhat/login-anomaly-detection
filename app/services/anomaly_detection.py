@@ -1,4 +1,5 @@
 from datetime import datetime
+import time
 from typing import Any, Dict, List
 
 from sqlalchemy.orm import Session
@@ -6,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database.models import Device, LoginAttempt
 from app.ml.model import FEATURE_COLUMNS, shared_anomaly_model
+from app.services.model_monitoring import model_monitoring_service
 from app.utils.helpers import calculate_distance
 
 
@@ -14,6 +16,7 @@ class AnomalyDetectionEngine:
         self.ml_model = shared_anomaly_model
 
     def detect_anomalies(self, user_id: int, login_data: Dict[str, Any], db: Session) -> Dict[str, Any]:
+        started = time.perf_counter()
         risk_score = 0.0
         reasons: List[str] = []
         attack_types: List[str] = []
@@ -67,7 +70,7 @@ class AnomalyDetectionEngine:
         decision = self._decision(risk_score)
         unique_attack_types = list(dict.fromkeys(attack_types))
 
-        return {
+        result = {
             "risk_score": risk_score,
             "level": level,
             "decision": decision,
@@ -81,6 +84,13 @@ class AnomalyDetectionEngine:
             "anomaly_score": float(ml_result.get("normalized_score", 0.0)),
             "confidence_score": max(0.0, min(1.0, 1.0 - (risk_score / 100.0))),
         }
+        model_monitoring_service.log_prediction(
+            risk_score=risk_score,
+            decision=decision,
+            latency_ms=(time.perf_counter() - started) * 1000,
+            features=features,
+        )
+        return result
 
     def retrain_from_login_attempts(self, db: Session) -> bool:
         attempts = db.query(LoginAttempt).filter(LoginAttempt.success == True).order_by(

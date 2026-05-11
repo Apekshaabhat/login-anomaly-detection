@@ -222,6 +222,199 @@ Simulation:
 - `POST /api/simulation/simulate-anomaly`
 - `POST /api/simulation/live/generate`
 
+Model operations:
+
+- `GET /api/model/status` - current model metrics, dataset size, version, latency, and drift health
+- `GET /api/model/drift` - PSI/KL drift result and affected features
+- `POST /api/model/retrain` - retrain Isolation Forest from successful login attempts
+- `GET /api/model/history` - model version history persisted in local metadata
+- `POST /api/model/explain` - explain a prediction from login feature values
+- `GET /api/model/monitoring` - prediction latency, anomaly rate, and health telemetry
+- `GET /api/model/confusion-matrix` - true/false normal/anomaly counts for visualization
+- `GET /api/model/registry` - registered model adapters and default active model
+
+## Model Monitoring Architecture
+
+The model page uses real backend APIs instead of random frontend values.
+
+Flow:
+
+```text
+Frontend Model page
+  -> /api/model/status
+  -> /api/model/drift
+  -> /api/model/monitoring
+  -> /api/model/history
+  -> /api/model/explain
+
+Backend model router
+  -> app/services/model_monitoring.py
+  -> app/ml/registry.py
+  -> app/ml/model.py
+  -> login_attempts table
+  -> app/ml/model_metadata.json
+  -> app/ml/model_predictions.jsonl
+```
+
+`model_metadata.json` stores the current model version, training history, and baseline feature distributions.
+
+`model_predictions.jsonl` stores lightweight prediction telemetry such as risk score, decision, latency, and feature values. If telemetry writing fails, prediction still continues.
+
+## Future-Ready Model Registry
+
+The backend includes a small plug-and-play model registry in `app/ml/registry.py`.
+
+Current default:
+
+```text
+isolation_forest -> Isolation Forest
+```
+
+Registered future adapters:
+
+```text
+xgboost
+autoencoder
+lstm
+```
+
+These future adapters are intentionally marked unavailable until their real dependencies and training logic are added. The API contract is already stable, so future models can implement:
+
+```text
+predict_anomaly_score(features)
+train(rows)
+metadata()
+```
+
+This keeps the current Isolation Forest pipeline fully backward-compatible while preparing the codebase for additional model classes.
+
+## Confusion Matrix
+
+`GET /api/model/confusion-matrix` returns counts for frontend visualization:
+
+```json
+{
+  "labels": ["normal", "anomaly"],
+  "matrix": [
+    [120, 8],
+    [4, 32]
+  ],
+  "counts": {
+    "tn": 120,
+    "fp": 8,
+    "fn": 4,
+    "tp": 32
+  },
+  "total": 164,
+  "generated_at": "2026-05-11T00:00:00"
+}
+```
+
+Rows are actual labels and columns are predicted labels:
+
+```text
+[[true normal, false alert],
+ [missed anomaly, true anomaly]]
+```
+
+## Drift Detection
+
+Drift detection compares recent production login features with the stored training baseline.
+
+Implemented methods:
+
+- PSI, Population Stability Index
+- KL divergence
+- feature-level affected feature reporting
+
+The backend marks drift as detected when the highest feature drift score is greater than `DRIFT_THRESHOLD`.
+Drift scores are PSI/KL-style raw scores, not accuracy percentages. A score above `0.2` usually means meaningful drift.
+Production histograms are compared against the same baseline bin edges captured during retraining, so retraining resets the baseline consistently.
+
+Default config:
+
+```env
+DRIFT_THRESHOLD=0.2
+MODEL_METADATA_PATH=app/ml/model_metadata.json
+MODEL_MONITORING_LOG_PATH=app/ml/model_predictions.jsonl
+```
+
+## Retraining Flow
+
+Retraining is triggered from:
+
+- the Model page `Retrain Model` button
+- `POST /api/model/retrain`
+- existing backend auto-retraining hooks after enough successful logins
+
+Retraining behavior:
+
+1. Query successful `LoginAttempt` rows.
+2. Build the same Isolation Forest feature columns used for prediction.
+3. Validate minimum sample count.
+4. Train a candidate model.
+5. Save model artifacts using `joblib`.
+6. Swap the trained model into memory only after training completes.
+7. Persist version metadata and baseline distributions.
+
+If there are not enough successful login samples, the API returns a safe error and the existing model remains active.
+
+## Explainability
+
+`POST /api/model/explain` accepts login feature values and returns the top anomalous factors.
+
+Example request:
+
+```json
+{
+  "login_features": {
+    "login_hour": 2,
+    "location_lat": 40.7128,
+    "location_lon": -74.006,
+    "typing_speed": 18,
+    "failed_attempts": 3,
+    "geo_distance_from_last_login": 1200
+  }
+}
+```
+
+The service uses lightweight feature contribution scoring against the learned baseline. This avoids adding a heavy SHAP dependency while still explaining why a login appears anomalous.
+
+## Testing
+
+Backend syntax/import check:
+
+```powershell
+python -m compileall app main.py
+python -c "from app.main import app; print('routes', len(app.routes))"
+```
+
+Backend model service smoke check:
+
+```powershell
+python -c "from app.database.connection import SessionLocal; from app.services.model_monitoring import model_monitoring_service; db=SessionLocal(); data=model_monitoring_service.get_status(db); print(data['model_name'], data['status'], data['dataset_size']); db.close()"
+```
+
+Frontend type check:
+
+```powershell
+npx tsc --noEmit
+```
+
+Frontend tests:
+
+```powershell
+npm run test
+```
+
+Frontend build:
+
+```powershell
+npm run build
+```
+
+If `npm run test` or `npm run build` fails with `spawn EPERM` on Windows, it is usually an esbuild process permission issue. Reopen PowerShell as a normal user, reinstall with `npm install --legacy-peer-deps`, and retry.
+
 ## Project Structure
 
 ```text
@@ -242,3 +435,4 @@ public/              Static frontend assets
 - Do not commit `.env`, local databases, logs, virtual environments, or dependency folders.
 - Change `SECRET_KEY` before using the app outside local development.
 - The SQLite database file is generated automatically when the backend starts.
+- The backend can run through either `uvicorn app.main:app --reload` or `uvicorn main:app --reload`.

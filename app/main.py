@@ -1,6 +1,6 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import auth, admin, simulation
+from app.routers import auth, admin, simulation, model
 from app.database.connection import engine
 from app.database.models import Base
 from app.ml.model import shared_anomaly_model
@@ -57,6 +57,7 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(admin.router, prefix="/api/admin", tags=["Administration"])
 app.include_router(simulation.router, prefix="/api/simulation", tags=["Simulation"])
+app.include_router(model.router, prefix="/api/model", tags=["Model Operations"])
 
 @app.on_event("startup")
 def warm_models():

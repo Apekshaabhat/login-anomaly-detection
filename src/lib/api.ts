@@ -84,6 +84,98 @@ export interface BehaviorResponse {
   failed_attempts: number;
 }
 
+export interface ModelStatusResponse {
+  model_name: string;
+  active_model_key: string;
+  available_models: ModelRegistryItem[];
+  version: string;
+  accuracy: number;
+  precision: number;
+  recall: number;
+  f1_score: number;
+  roc_auc: number;
+  false_positive_rate: number;
+  confusion_matrix: ModelConfusionMatrixResponse;
+  inference_time_ms: number;
+  dataset_size: number;
+  last_trained: string;
+  drift_detected: boolean;
+  drift_score: number;
+  status: "healthy" | "degraded" | "unavailable";
+}
+
+export interface ModelRegistryItem {
+  key: string;
+  name: string;
+  available: boolean;
+}
+
+export interface ModelRegistryResponse {
+  default_model: string;
+  models: ModelRegistryItem[];
+}
+
+export interface ModelConfusionMatrixResponse {
+  labels: ["normal", "anomaly"] | string[];
+  matrix: number[][];
+  counts: {
+    tn: number;
+    fp: number;
+    fn: number;
+    tp: number;
+  };
+  total: number;
+  generated_at: string;
+}
+
+export interface ModelDriftResponse {
+  drift_detected: boolean;
+  drift_score: number;
+  affected_features: Array<{
+    feature: string;
+    score: number;
+    psi?: number;
+    kl_divergence?: number;
+  }>;
+  timestamp: string;
+}
+
+export interface ModelRetrainResponse {
+  success: boolean;
+  new_version: string;
+  training_samples: number;
+  training_time_seconds: number;
+  metrics: Record<string, number>;
+}
+
+export interface ModelHistoryItem {
+  version: string;
+  trained_at: string;
+  dataset_size: number;
+  accuracy: number;
+}
+
+export interface ModelExplainResponse {
+  risk_score: number;
+  top_factors: Array<{
+    feature: string;
+    impact: number;
+    description?: string;
+  }>;
+  explanation: string;
+}
+
+export interface ModelMonitoringResponse {
+  status: string;
+  total_predictions: number;
+  average_latency_ms: number;
+  p95_latency_ms: number;
+  anomaly_rate: number;
+  recent_prediction_count: number;
+  recent_block_rate: number;
+  timestamp: string;
+}
+
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     headers: {
@@ -163,4 +255,41 @@ export function generateLiveSimulation(count = 5) {
     method: "POST",
     body: JSON.stringify({ count }),
   });
+}
+
+export function fetchModelStatus() {
+  return requestJson<ModelStatusResponse>("/api/model/status");
+}
+
+export function fetchModelDrift() {
+  return requestJson<ModelDriftResponse>("/api/model/drift");
+}
+
+export function retrainModel() {
+  return requestJson<ModelRetrainResponse>("/api/model/retrain", {
+    method: "POST",
+  });
+}
+
+export function fetchModelHistory() {
+  return requestJson<ModelHistoryItem[]>("/api/model/history");
+}
+
+export function explainModel(loginFeatures: Record<string, number | string>) {
+  return requestJson<ModelExplainResponse>("/api/model/explain", {
+    method: "POST",
+    body: JSON.stringify({ login_features: loginFeatures }),
+  });
+}
+
+export function fetchModelMonitoring() {
+  return requestJson<ModelMonitoringResponse>("/api/model/monitoring");
+}
+
+export function fetchModelConfusionMatrix() {
+  return requestJson<ModelConfusionMatrixResponse>("/api/model/confusion-matrix");
+}
+
+export function fetchModelRegistry() {
+  return requestJson<ModelRegistryResponse>("/api/model/registry");
 }

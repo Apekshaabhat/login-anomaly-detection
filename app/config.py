@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     model_threshold_percentile: float = 95.0
     min_training_samples: int = 20
     auto_retrain_login_count: int = 50
+    drift_threshold: float = 0.2
+    model_metadata_path: str = "app/ml/model_metadata.json"
+    model_monitoring_log_path: str = "app/ml/model_predictions.jsonl"
     verification_token_ttl_seconds: int = 300
     verification_max_attempts: int = 3
     expose_debug_otp: bool = False
