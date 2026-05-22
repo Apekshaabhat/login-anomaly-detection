@@ -1,13 +1,17 @@
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
-  Shield, LayoutDashboard, Brain, Settings, Activity,
+  Shield, LayoutDashboard, Brain, Settings, Activity, Monitor, History,
   Menu, X, Lock
 } from "lucide-react";
+import { useBehaviorTelemetry } from "@/hooks/useBehaviorTelemetry";
 
 const navItems = [
   { path: "/", label: "Login", icon: Lock },
   { path: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { path: "/security", label: "Security", icon: History },
+  { path: "/ai-security", label: "AI Risk", icon: Shield },
+  { path: "/devices", label: "Devices", icon: Monitor },
   { path: "/behavior", label: "Behavior", icon: Brain },
   { path: "/admin", label: "Admin", icon: Settings },
   { path: "/model", label: "Model", icon: Activity },
@@ -16,6 +20,7 @@ const navItems = [
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
+  useBehaviorTelemetry();
 
   return (
     <div className="min-h-screen flex flex-col">

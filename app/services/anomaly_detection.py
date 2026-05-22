@@ -39,6 +39,18 @@ class AnomalyDetectionEngine:
             risk_score += 15
             reasons.append("Unrecognized device")
 
+        ip_address = login_data.get("ip_address")
+        known_ip = None
+        if ip_address:
+            known_ip = db.query(LoginAttempt).filter(
+                LoginAttempt.user_id == user_id,
+                LoginAttempt.ip_address == ip_address,
+                LoginAttempt.success == True,
+            ).first()
+        if ip_address and not known_ip:
+            risk_score += 15
+            reasons.append("New IP address")
+
         if timestamp.hour < 6 or timestamp.hour > 23:
             risk_score += 10
             reasons.append("Unusual login time")
@@ -162,15 +174,17 @@ class AnomalyDetectionEngine:
         return {"distance": distance, "velocity": velocity}
 
     def _risk_level(self, risk_score: float) -> str:
-        if risk_score >= 70:
+        if risk_score >= settings.critical_risk_threshold:
+            return "CRITICAL"
+        if risk_score >= settings.high_risk_threshold:
             return "HIGH"
-        if risk_score >= 40:
+        if risk_score >= settings.medium_risk_threshold:
             return "MEDIUM"
         return "LOW"
 
     def _decision(self, risk_score: float) -> str:
-        if risk_score >= 70:
+        if risk_score >= settings.critical_risk_threshold:
             return "block"
-        if risk_score >= 40:
+        if risk_score >= settings.medium_risk_threshold:
             return "require_verification"
         return "allow"

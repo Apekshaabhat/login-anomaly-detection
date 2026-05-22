@@ -45,50 +45,16 @@ class LiveSimulationService:
         return users
 
     def generate_live_attempts(self, db: Session, count: int = 5) -> List[Dict[str, Any]]:
-        users = db.query(User).all() or self.ensure_demo_users(db)
+        users = self.ensure_demo_users(db)
         generated_attempts: List[Dict[str, Any]] = []
 
         for _ in range(count):
-            user = random.choice(users)
-            timestamp = datetime.utcnow().replace(
-                hour=random.randint(0, 23),
-                minute=random.randint(0, 59),
-                second=0,
-                microsecond=0,
-            )
-            login_data = {
-                "timestamp": timestamp,
-                "ip_address": f"203.0.113.{random.randint(1, 254)}",
-                "location_lat": round(random.uniform(-60, 75), 6),
-                "location_lon": round(random.uniform(-170, 170), 6),
-                "device_fingerprint": f"live-device-{random.randint(1, 8)}",
-                "typing_speed": round(random.uniform(5, 80), 2),
-                "failed_attempts_override": random.choice([0, 0, 1, 3, 5]),
-            }
-            anomaly_result = self.anomaly_engine.detect_anomalies(user.id, login_data, db)
-            attempt = LoginAttempt(
-                user_id=user.id,
-                timestamp=timestamp,
-                ip_address=login_data["ip_address"],
-                location_lat=login_data["location_lat"],
-                location_lon=login_data["location_lon"],
-                device_fingerprint=login_data["device_fingerprint"],
-                typing_speed=login_data["typing_speed"],
-                success=anomaly_result["decision"] != "block",
-                risk_score=anomaly_result["risk_score"],
-                decision=anomaly_result["decision"],
-                reasons=json.dumps(anomaly_result["reasons"]),
-                anomaly_score=anomaly_result["anomaly_score"],
-                confidence_score=anomaly_result["confidence_score"],
-            )
-            db.add(attempt)
-            db.flush()
-            generated_attempts.append({
-                "user": user.username,
-                "ip": login_data["ip_address"],
-                "risk_score": anomaly_result["risk_score"],
-                "decision": anomaly_result["decision"],
-            })
+            severity = random.choices(
+                ["low", "medium", "high", "critical"],
+                weights=[4, 4, 3, 1],
+                k=1,
+            )[0]
+            generated_attempts.append(self._create_attempt_for_severity(random.choice(users), severity, db))
 
         db.commit()
         return generated_attempts

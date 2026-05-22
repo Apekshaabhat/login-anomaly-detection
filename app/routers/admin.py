@@ -7,7 +7,7 @@ from statistics import mean
 from datetime import datetime, timedelta
 import json
 from app.database.connection import get_db
-from app.database.models import AuditLog, LoginAttempt, User, UserProfile, AlertRecord
+from app.database.models import AuditLog, Device, LoginAttempt, User, UserProfile, AlertRecord, IPReputation, SuspiciousIP
 from app.schemas.analytics import BehaviorResponse, BehaviorTrendPoint, BehaviorComparisonPoint, DashboardResponse
 from app.services.logging_service import LoggingService
 from app.services.anomaly_detection import AnomalyDetectionEngine
@@ -72,6 +72,35 @@ def _alert_payload(alert: AlertRecord) -> Dict[str, Any]:
         "auto_action": alert.auto_action,
     }
 
+
+def _device_payload(device: Device) -> Dict[str, Any]:
+    username = device.user.username if getattr(device, "user", None) else f"user-{device.user_id}"
+    return {
+        "id": device.id,
+        "user_id": device.user_id,
+        "username": username,
+        "fingerprint": device.fingerprint,
+        "nickname": device.nickname,
+        "browser": device.browser,
+        "os": device.os,
+        "device_type": device.device_type,
+        "screen_resolution": device.screen_resolution,
+        "timezone": device.timezone,
+        "language": device.language,
+        "hardware_fingerprint": device.hardware_fingerprint,
+        "user_agent_hash": device.user_agent_hash,
+        "state": device.state or ("trusted" if device.is_trusted else "pending_verification"),
+        "is_trusted": device.is_trusted,
+        "remember_device": device.remember_device,
+        "first_ip_address": device.first_ip_address,
+        "last_ip_address": device.last_ip_address,
+        "approval_status": device.approval_status or "approved",
+        "approved_at": device.approved_at,
+        "last_mfa_method": device.last_mfa_method,
+        "first_seen": device.first_seen,
+        "last_seen": device.last_seen,
+    }
+
 @router.get("/logs", response_model=List[Dict[str, Any]])
 def get_audit_logs(limit: int = 100, db: Session = Depends(get_db)):
     logs = db.query(AuditLog).order_by(AuditLog.timestamp.desc()).limit(limit).all()
@@ -102,7 +131,13 @@ def get_login_attempts(user_id: int = None, limit: int = 100, db: Session = Depe
             "success": attempt.success,
             "risk_score": attempt.risk_score,
             "decision": attempt.decision,
-            "reasons": attempt.reasons
+            "reasons": attempt.reasons,
+            "mfa_required": attempt.mfa_required,
+            "mfa_method": attempt.mfa_method,
+            "mfa_verified_at": attempt.mfa_verified_at,
+            "new_device": attempt.new_device,
+            "new_ip": attempt.new_ip,
+            "device_approval_status": attempt.device_approval_status,
         }
         for attempt in attempts
     ]
@@ -112,6 +147,32 @@ def get_login_attempts(user_id: int = None, limit: int = 100, db: Session = Depe
 def get_alerts(limit: int = 100, db: Session = Depends(get_db)):
     alerts = db.query(AlertRecord).order_by(AlertRecord.created_at.desc()).limit(limit).all()
     return [_alert_payload(alert) for alert in alerts]
+
+
+@router.get("/devices", response_model=List[Dict[str, Any]])
+def get_devices(user_id: int = None, limit: int = 100, db: Session = Depends(get_db)):
+    query = db.query(Device)
+    if user_id:
+        query = query.filter(Device.user_id == user_id)
+    devices = query.order_by(Device.last_seen.desc()).limit(limit).all()
+    return [_device_payload(device) for device in devices]
+
+
+@router.post("/devices/{device_id}/approve", response_model=dict)
+def approve_device(device_id: int, request: AdminActionRequest, db: Session = Depends(get_db)):
+    if request.admin_token != settings.admin_secret_token:
+        raise HTTPException(status_code=403, detail="Invalid admin token")
+
+    device = db.query(Device).filter(Device.id == device_id).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    device.approval_status = "approved"
+    device.approved_at = datetime.utcnow()
+    device.is_trusted = True
+    device.state = "trusted"
+    logging_service.log_admin_action(0, "device_approved", f"Approved device {device.id}", db)
+    return {"message": "Device approved", "device": _device_payload(device)}
 
 
 @router.post("/alerts/{alert_id}/resolve", response_model=dict)
@@ -152,6 +213,55 @@ def block_from_alert(alert_id: int, request: AdminActionRequest, db: Session = D
     return {"message": "User blocked from alert"}
 
 
+@router.get("/analytics", response_model=Dict[str, Any])
+def get_admin_analytics(db: Session = Depends(get_db)):
+    attempts = db.query(LoginAttempt).order_by(LoginAttempt.timestamp.desc()).limit(1000).all()
+    devices = db.query(Device).all()
+    alerts = db.query(AlertRecord).filter(AlertRecord.resolved == False).all()
+    suspicious_ips = db.query(SuspiciousIP).order_by(SuspiciousIP.last_seen_at.desc()).limit(10).all()
+    reputations = db.query(IPReputation).order_by(IPReputation.risk_score.desc()).limit(10).all()
+
+    country_counts = Counter(attempt.country or "Unknown" for attempt in attempts)
+    device_states = Counter(device.state or ("trusted" if device.is_trusted else "pending_verification") for device in devices)
+    risk_buckets = Counter(
+        "critical" if (attempt.risk_score or 0) >= 90 else
+        "high" if (attempt.risk_score or 0) >= 70 else
+        "medium" if (attempt.risk_score or 0) >= 40 else
+        "low"
+        for attempt in attempts
+    )
+    mfa_attempts = [attempt for attempt in attempts if attempt.mfa_required]
+    mfa_success = sum(1 for attempt in mfa_attempts if attempt.mfa_verified_at)
+
+    return {
+        "live_login_attempts": len(attempts),
+        "active_alerts": len(alerts),
+        "attack_source_countries": [
+            {"country": country, "attempts": count}
+            for country, count in country_counts.most_common(10)
+        ],
+        "device_trust_statistics": dict(device_states),
+        "risk_score_distribution": dict(risk_buckets),
+        "mfa_metrics": {
+            "required": len(mfa_attempts),
+            "success": mfa_success,
+            "failure": max(0, len(mfa_attempts) - mfa_success),
+        },
+        "suspicious_ip_leaderboard": [
+            {"ip_address": item.ip_address, "reason": item.reason, "severity": item.severity}
+            for item in suspicious_ips
+        ] + [
+            {
+                "ip_address": item.ip_address,
+                "reason": f"Reputation score {round(item.risk_score or 0, 2)}",
+                "severity": "high" if (item.risk_score or 0) >= 70 else "medium",
+            }
+            for item in reputations
+        ],
+        "real_time_alerts": [_alert_payload(alert) for alert in alerts[:20]],
+    }
+
+
 @router.get("/dashboard", response_model=DashboardResponse)
 def get_dashboard(limit: int = 100, db: Session = Depends(get_db)):
     attempts = db.query(LoginAttempt).order_by(LoginAttempt.timestamp.desc()).limit(limit).all()
@@ -170,6 +280,12 @@ def get_dashboard(limit: int = 100, db: Session = Depends(get_db)):
             "location_lat": attempt.location_lat,
             "location_lon": attempt.location_lon,
             "reasons": _parse_reasons(attempt.reasons),
+            "mfa_required": attempt.mfa_required,
+            "mfa_method": attempt.mfa_method,
+            "mfa_verified_at": attempt.mfa_verified_at,
+            "new_device": attempt.new_device,
+            "new_ip": attempt.new_ip,
+            "device_approval_status": attempt.device_approval_status,
         })
 
     grouped_scores = defaultdict(list)

@@ -22,15 +22,25 @@ export default function LoginMap({ logs }: Props) {
         document.head.appendChild(link);
       }
 
+      const worldBounds = L.latLngBounds(L.latLng(-85, -180), L.latLng(85, 180));
       const map = L.map(mapRef.current!, {
         center: [20, 0],
         zoom: 2,
+        minZoom: 2,
+        maxZoom: 6,
+        maxBounds: worldBounds,
+        maxBoundsViscosity: 1,
         zoomControl: false,
         attributionControl: false,
+        worldCopyJump: false,
       });
       const markerLayer = L.layerGroup().addTo(map);
 
-      L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png").addTo(map);
+      L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+        bounds: worldBounds,
+        noWrap: true,
+      }).addTo(map);
+      map.setMaxBounds(worldBounds);
 
       mapInstance.current = map;
       layerGroupRef.current = markerLayer;

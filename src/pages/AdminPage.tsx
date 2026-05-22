@@ -1,17 +1,33 @@
 import { useEffect, useMemo, useState } from "react";
-import { Bell, Check, Monitor, Settings, Shield, Slash, X } from "lucide-react";
+import { Bell, Check, Monitor, Settings, Shield, Slash } from "lucide-react";
 
 import GlassCard from "@/components/GlassCard";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
-import { blockAlert, fetchAlerts, generateLiveSimulation, resolveAlert, type AdminAlert } from "@/lib/api";
+import {
+  approveDevice,
+  blockAlert,
+  fetchAdminAnalytics,
+  fetchAlerts,
+  fetchDevices,
+  generateLiveSimulation,
+  resolveAlert,
+  type AdminAnalytics,
+  type AdminAlert,
+  type DeviceRecord,
+} from "@/lib/api";
+
+function formatMfaMethod(method?: string | null) {
+  if (method === "email_otp") return "Email OTP";
+  if (method === "sms_otp") return "SMS OTP";
+  return "None";
+}
 
 export default function AdminPage() {
   const [threshold, setThreshold] = useState(65);
   const [alerts, setAlerts] = useState<AdminAlert[]>([]);
-  const [trustedDevices, setTrustedDevices] = useState(["Chrome / Windows 11", "Safari / macOS 14"]);
-  const [newDevice, setNewDevice] = useState("");
+  const [devices, setDevices] = useState<DeviceRecord[]>([]);
+  const [analytics, setAnalytics] = useState<AdminAnalytics | null>(null);
   const [simulating, setSimulating] = useState(true);
 
   const refreshAlerts = async () => {
@@ -23,8 +39,27 @@ export default function AdminPage() {
     }
   };
 
+  const refreshDevices = async () => {
+    try {
+      const data = await fetchDevices();
+      setDevices(data);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to load devices.");
+    }
+  };
+
+  const refreshAnalytics = async () => {
+    try {
+      setAnalytics(await fetchAdminAnalytics());
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to load admin analytics.");
+    }
+  };
+
   useEffect(() => {
     void refreshAlerts();
+    void refreshDevices();
+    void refreshAnalytics();
   }, []);
 
   useEffect(() => {
@@ -34,6 +69,8 @@ export default function AdminPage() {
       try {
         await generateLiveSimulation(2);
         await refreshAlerts();
+        await refreshDevices();
+        await refreshAnalytics();
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "Live simulation failed.");
       }
@@ -62,6 +99,16 @@ export default function AdminPage() {
     }
   };
 
+  const approveTrackedDevice = async (id: number) => {
+    try {
+      await approveDevice(id);
+      await refreshDevices();
+      toast.success("Device approved.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to approve device.");
+    }
+  };
+
   const severityColor: Record<string, string> = {
     low: "bg-success/10 text-success",
     medium: "bg-warning/10 text-warning",
@@ -69,11 +116,18 @@ export default function AdminPage() {
     critical: "bg-destructive/20 text-destructive",
   };
 
-  const addDevice = () => {
-    if (newDevice.trim() && !trustedDevices.includes(newDevice.trim())) {
-      setTrustedDevices((prev) => [...prev, newDevice.trim()]);
-      setNewDevice("");
-    }
+  const approvalColor: Record<string, string> = {
+    pending: "bg-warning/10 text-warning",
+    approved: "bg-success/10 text-success",
+    denied: "bg-destructive/10 text-destructive",
+  };
+
+  const stateColor = (state?: string) => {
+    if (state === "trusted") return "bg-success/10 text-success";
+    if (state === "blocked") return "bg-destructive/10 text-destructive";
+    if (state === "suspicious") return "bg-warning/10 text-warning";
+    if (state === "pending_verification") return "bg-warning/10 text-warning";
+    return undefined;
   };
 
   const liveAlerts = useMemo(() => alerts.filter((alert) => !alert.resolved), [alerts]);
@@ -84,6 +138,25 @@ export default function AdminPage() {
       <h1 className="text-xl font-bold flex items-center gap-2">
         <Settings className="w-5 h-5 text-primary" /> Admin Control Panel
       </h1>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <GlassCard>
+          <p className="text-xs text-muted-foreground">Login attempts</p>
+          <p className="text-2xl font-bold font-mono">{analytics?.live_login_attempts ?? 0}</p>
+        </GlassCard>
+        <GlassCard>
+          <p className="text-xs text-muted-foreground">Active alerts</p>
+          <p className="text-2xl font-bold font-mono text-warning">{analytics?.active_alerts ?? liveAlerts.length}</p>
+        </GlassCard>
+        <GlassCard>
+          <p className="text-xs text-muted-foreground">MFA success</p>
+          <p className="text-2xl font-bold font-mono text-success">{analytics?.mfa_metrics.success ?? 0}</p>
+        </GlassCard>
+        <GlassCard>
+          <p className="text-xs text-muted-foreground">Suspicious IPs</p>
+          <p className="text-2xl font-bold font-mono text-destructive">{analytics?.suspicious_ip_leaderboard.length ?? 0}</p>
+        </GlassCard>
+      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <GlassCard glow>
@@ -97,7 +170,17 @@ export default function AdminPage() {
               <Button size="sm" onClick={() => setSimulating((value) => !value)}>
                 {simulating ? "Pause Stream" : "Resume Stream"}
               </Button>
-              <Button size="sm" variant="outline" onClick={() => void generateLiveSimulation(6).then(refreshAlerts)}>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  void generateLiveSimulation(6).then(async () => {
+                    await refreshAlerts();
+                    await refreshDevices();
+                    await refreshAnalytics();
+                  })
+                }
+              >
                 Generate Burst
               </Button>
             </div>
@@ -125,27 +208,36 @@ export default function AdminPage() {
           <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
             <Monitor className="w-4 h-4" /> Trusted Devices
           </h3>
-          <div className="space-y-2 mb-3">
-            {trustedDevices.map((device, index) => (
-              <div key={`${device}-${index}`} className="flex items-center justify-between p-2 rounded-lg bg-secondary/30 text-sm">
-                <span>{device}</span>
-                <button
-                  onClick={() => setTrustedDevices((prev) => prev.filter((_, currentIndex) => currentIndex !== index))}
-                  className="text-muted-foreground hover:text-destructive transition-colors"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
+          <div className="space-y-2 max-h-64 overflow-y-auto">
+            {devices.length === 0 && (
+              <p className="text-sm text-muted-foreground text-center py-4">No tracked devices yet</p>
+            )}
+            {devices.map((device) => (
+              <div key={device.id} className="p-2.5 rounded-lg bg-secondary/30 text-sm space-y-2">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate font-medium">{device.username}</p>
+                    <p className="text-xs text-muted-foreground truncate">{device.fingerprint}</p>
+                  </div>
+                  <span
+                    className={`text-xs px-2 py-0.5 rounded-full shrink-0 ${
+                      approvalColor[device.approval_status] ?? stateColor(device.state) ?? "bg-secondary text-muted-foreground"
+                    }`}
+                  >
+                    {device.state ?? device.approval_status}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+                  <span className="font-mono truncate">IP {device.last_ip_address ?? "unknown"}</span>
+                  <span>{formatMfaMethod(device.last_mfa_method)}</span>
+                </div>
+                {device.approval_status === "pending" && (
+                  <Button size="sm" variant="outline" className="w-full text-xs" onClick={() => void approveTrackedDevice(device.id)}>
+                    <Check className="w-3.5 h-3.5 mr-1.5" /> Approve
+                  </Button>
+                )}
               </div>
             ))}
-          </div>
-          <div className="flex gap-2">
-            <Input
-              placeholder="Add device..."
-              className="bg-secondary/50 border-border/50 text-sm"
-              value={newDevice}
-              onChange={(e) => setNewDevice(e.target.value)}
-            />
-            <Button size="sm" onClick={addDevice}>Add</Button>
           </div>
         </GlassCard>
 
@@ -168,7 +260,7 @@ export default function AdminPage() {
                 <div className="flex-1 min-w-0">
                   <p className="text-sm">{alert.message}</p>
                   <p className="text-xs text-muted-foreground">
-                    {alert.username} • {new Date(alert.time).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                    {alert.username} - {new Date(alert.time).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
                   </p>
                   <p className="text-xs text-muted-foreground">Attack Type: {alert.attack_type}</p>
                 </div>

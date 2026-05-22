@@ -13,6 +13,9 @@ python-multipart==0.0.6
 pandas==2.1.4
 numpy==1.26.2
 geopy==2.4.1
+geoip2==4.8.0
 pyotp==2.9.0
 python-dotenv==1.0.0
 alembic==1.13.1
+celery==5.3.6
+httpx==0.25.2

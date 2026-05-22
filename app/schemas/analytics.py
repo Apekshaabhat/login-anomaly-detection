@@ -32,6 +32,13 @@ class AnalyzeResponse(BaseModel):
     decision: Optional[str] = None
     verification_token: Optional[str] = None
     debug_otp: Optional[str] = None
+    login_attempt_id: Optional[int] = None
+    ip_address: Optional[str] = None
+    mfa_required: bool = False
+    mfa_method: Optional[str] = None
+    new_device: bool = False
+    new_ip: bool = False
+    device_approval_status: Optional[str] = None
 
 
 class DashboardLogItem(BaseModel):
@@ -46,6 +53,12 @@ class DashboardLogItem(BaseModel):
     location_lat: Optional[float] = None
     location_lon: Optional[float] = None
     reasons: List[str] = []
+    mfa_required: bool = False
+    mfa_method: Optional[str] = None
+    mfa_verified_at: Optional[datetime] = None
+    new_device: bool = False
+    new_ip: bool = False
+    device_approval_status: Optional[str] = None
 
 
 class DashboardTimelinePoint(BaseModel):

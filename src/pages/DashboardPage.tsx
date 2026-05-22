@@ -26,6 +26,12 @@ const emptyDashboard: DashboardResponse = {
   distribution: [],
 };
 
+function formatMfaMethod(method?: string | null) {
+  if (method === "email_otp") return "Email OTP";
+  if (method === "sms_otp") return "SMS OTP";
+  return "None";
+}
+
 export default function DashboardPage() {
   const [dashboard, setDashboard] = useState<DashboardResponse>(emptyDashboard);
   const [search, setSearch] = useState("");
@@ -183,6 +189,8 @@ export default function DashboardPage() {
               <th className="text-left py-2 px-3 font-medium">Time</th>
               <th className="text-left py-2 px-3 font-medium hidden sm:table-cell">Location</th>
               <th className="text-left py-2 px-3 font-medium hidden md:table-cell">Device</th>
+              <th className="text-left py-2 px-3 font-medium hidden lg:table-cell">IP</th>
+              <th className="text-left py-2 px-3 font-medium hidden lg:table-cell">MFA</th>
               <th className="text-left py-2 px-3 font-medium">Risk</th>
               <th className="text-left py-2 px-3 font-medium">Status</th>
             </tr>
@@ -201,6 +209,11 @@ export default function DashboardPage() {
                 </td>
                 <td className="py-2.5 px-3 text-xs hidden sm:table-cell">{log.location}</td>
                 <td className="py-2.5 px-3 text-xs hidden md:table-cell text-muted-foreground">{log.device}</td>
+                <td className="py-2.5 px-3 text-xs hidden lg:table-cell font-mono text-muted-foreground">{log.ip_address}</td>
+                <td className="py-2.5 px-3 text-xs hidden lg:table-cell text-muted-foreground">
+                  {formatMfaMethod(log.mfa_method)}
+                  {log.mfa_verified_at && <span className="ml-1 text-success">verified</span>}
+                </td>
                 <td className="py-2.5 px-3">
                   <div className="flex items-center gap-2">
                     <div className="w-12 h-1.5 rounded-full bg-secondary overflow-hidden">
@@ -231,7 +244,7 @@ export default function DashboardPage() {
             ))}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={6} className="py-6 text-center text-sm text-muted-foreground">
+                <td colSpan={8} className="py-6 text-center text-sm text-muted-foreground">
                   No login attempts match the current filters.
                 </td>
               </tr>

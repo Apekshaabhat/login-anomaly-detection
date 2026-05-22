@@ -9,14 +9,32 @@ class LoggingService:
         self.logger = logging.getLogger(__name__)
         logging.basicConfig(level=logging.INFO)
 
-    def log_login_attempt(self, user_id: int, ip_address: str, success: bool, risk_score: float, decision: str, reasons: list, db: Session) -> None:
+    def log_login_attempt(
+        self,
+        user_id: int,
+        ip_address: str,
+        success: bool,
+        risk_score: float,
+        decision: str,
+        reasons: list,
+        db: Session,
+        login_attempt_id: int = None,
+        mfa_method: str = None,
+        new_device: bool = False,
+        new_ip: bool = False,
+        device_approval_status: str = None,
+    ) -> None:
         details = {
             "user_id": user_id,
             "ip_address": ip_address,
             "success": success,
             "risk_score": risk_score,
             "decision": decision,
-            "reasons": reasons
+            "reasons": reasons,
+            "mfa_method": mfa_method,
+            "new_device": new_device,
+            "new_ip": new_ip,
+            "device_approval_status": device_approval_status,
         }
 
         audit_log = AuditLog(
@@ -32,6 +50,7 @@ class LoggingService:
             severity = self._severity_from_risk(risk_score)
             alert = AlertRecord(
                 user_id=user_id,
+                login_attempt_id=login_attempt_id,
                 severity=severity,
                 message=f"High-risk login attempt from {ip_address}",
                 attack_type=self._attack_type_from_reasons(reasons),
@@ -84,6 +103,6 @@ class LoggingService:
             return "brute_force"
         if "travel" in reason_text:
             return "account_takeover"
-        if "device" in reason_text:
+        if "device" in reason_text or "ip address" in reason_text:
             return "suspicious_device"
         return "None"

@@ -12,12 +12,15 @@ coverage/
 
 # Python
 __pycache__/
+**/__pycache__/
 *.py[cod]
 *.pyo
 *.pyd
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.coverage
+htmlcov/
 
 # Environment and local config
 .env
@@ -30,10 +33,18 @@ __pycache__/
 *.db
 *.sqlite
 *.sqlite3
+*.mmdb
 *.pkl
 *.joblib
 app/ml/model_metadata.json
 app/ml/model_predictions.jsonl
+app/ml/*.jsonl
+app/ml/*.parquet
+app/ml/*.csv
+sessions/
+session-replays/
+replays/
+*.har
 
 # Logs
 logs/
@@ -48,9 +59,11 @@ lerna-debug.log*
 # Package manager caches
 .npm/
 .pnpm-store/
+.bun/
 
 # Deployment and tooling
 .vercel/
+.vercel
 
 # Editor directories and files
 .vscode/*
@@ -63,6 +76,4 @@ Thumbs.db
 *.njsproj
 *.sln
 *.sw?
-
-.vercel
 .env*.local

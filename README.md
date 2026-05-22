@@ -8,6 +8,12 @@ A full-stack login security dashboard for detecting suspicious authentication ac
 - Login anomaly detection using rule-based signals and an Isolation Forest model
 - Behavioral learning from successful user logins
 - Adaptive OTP verification for risky logins
+- MFA method capture (`email_otp` or `sms_otp`) on login attempts
+- Request IP tracking, new device/IP email alerts, and optional admin approval
+- Enterprise AI risk engine with fraud probability, session trust scoring, and continuous authentication telemetry
+- Behavioral biometrics from typing cadence, correction rate, mouse movement, scroll behavior, focus changes, idle ratio, and session-replay anomaly metadata
+- Optional threat intelligence integrations for AbuseIPDB, IPQualityScore, MaxMind GeoIP2, VirusTotal, and Have I Been Pwned Pwned Passwords
+- AI Security dashboard for attack monitoring, suspicious sessions, heatmaps, anomaly timelines, and trust trends
 - Account lockout and administrative alert handling
 - Dashboard views for risk trends, locations, alerts, and behavior profiles
 - Simulation endpoints for brute-force, anomaly, and live event testing
@@ -15,7 +21,7 @@ A full-stack login security dashboard for detecting suspicious authentication ac
 ## Tech Stack
 
 - Frontend: React, TypeScript, Vite, Tailwind CSS, shadcn/ui, React Query
-- Backend: FastAPI, SQLAlchemy, Pydantic, scikit-learn
+- Backend: FastAPI, SQLAlchemy, Pydantic, scikit-learn, GeoIP2-ready enrichment
 - Storage: SQLite by default, PostgreSQL optional
 - Cache/rate limiting: Redis optional
 - Tests: Vitest for frontend tests
@@ -44,6 +50,79 @@ SECRET_KEY=change-this-before-production
 ```
 
 The checked-in `.env.example` also includes PostgreSQL settings for use with `docker-compose.yml`.
+Set `SMTP_HOST`, `SMTP_USERNAME`, `SMTP_PASSWORD`, and `SMTP_FROM_EMAIL` to send real new device/IP emails; without SMTP, the backend prints an email preview to the console. Set `REQUIRE_DEVICE_IP_APPROVAL=true` when admins should approve newly observed device/IP combinations.
+
+Optional enterprise threat intelligence:
+
+```env
+ABUSEIPDB_API_KEY=
+IPQUALITYSCORE_API_KEY=
+HIBP_API_KEY=
+MAXMIND_ACCOUNT_ID=
+MAXMIND_LICENSE_KEY=
+MAXMIND_GEOIP_DB_PATH=
+VIRUSTOTAL_API_KEY=
+THREAT_INTEL_TIMEOUT_SECONDS=4
+THREAT_INTEL_CACHE_TTL_SECONDS=3600
+CONTINUOUS_AUTH_INTERVAL_SECONDS=30
+```
+
+AbuseIPDB and IPQualityScore enrich IP reputation when keys are configured. Have I Been Pwned Pwned Passwords uses the k-anonymous SHA-1 prefix range API and is also used by password validation/registration.
+
+Optional enterprise platform integrations:
+
+```env
+SENDGRID_API_KEY=
+RESEND_API_KEY=
+BREVO_API_KEY=
+AUTHY_API_KEY=
+FIREBASE_PROJECT_ID=
+CLERK_PUBLISHABLE_KEY=
+AUTH0_DOMAIN=
+FINGERPRINTJS_PUBLIC_KEY=
+RRWEB_ENABLED=false
+MAPBOX_ACCESS_TOKEN=
+```
+
+These integrations are surfaced in the AI Security dashboard so the project can demonstrate a realistic enterprise identity-security architecture while still running locally without external services.
+
+The frontend also reads optional public keys for browser-side demos:
+
+```env
+VITE_ADMIN_SECRET_TOKEN=
+VITE_FINGERPRINTJS_PUBLIC_KEY=
+VITE_RRWEB_ENABLED=false
+VITE_MAPBOX_ACCESS_TOKEN=
+```
+
+Do not commit real API keys. Keep them only in `.env` or your deployment provider's secret manager.
+
+## Demo Login Credentials
+
+The backend seeds two demo users on startup when `SEED_DEMO_USERS=true`.
+
+Normal user:
+
+```text
+Username: demo_user
+Password: DemoUser@12345
+```
+
+Admin demo user:
+
+```text
+Username: admin_user
+Password: AdminUser@12345
+```
+
+The admin demo user can sign in like a normal user to access authenticated pages. Admin actions such as resolving alerts, blocking users, approving devices, retraining, or adding password blacklist entries still require the admin action token:
+
+```env
+ADMIN_SECRET_TOKEN=admin@123
+VITE_ADMIN_SECRET_TOKEN=admin@123
+```
+
+For production or public demos, change these credentials and set `SEED_DEMO_USERS=false` after creating real accounts.
 
 ## Backend Setup
 
@@ -202,6 +281,19 @@ Authentication:
 - `POST /api/auth/login`
 - `POST /api/auth/verify`
 - `POST /api/auth/analyze`
+- `POST /api/auth/verify-otp`
+- `POST /api/auth/approve-device`
+- `POST /api/auth/deny-device`
+- `POST /api/auth/refresh`
+- `POST /api/auth/logout`
+
+AI security:
+
+- `POST /api/ai/telemetry` - continuous behavioral biometrics and session trust scoring
+- `POST /api/ai/risk-score` - dynamic risk score from IP, device, behavior, geo, and history
+- `GET /api/ai/dashboard` - live AI security analytics
+- `GET /api/ai/threat-intel/ip/{ip_address}` - AbuseIPDB/IPQualityScore-backed IP intelligence
+- `POST /api/ai/threat-intel/password` - HIBP Pwned Passwords range check
 
 Administration:
 
@@ -210,6 +302,8 @@ Administration:
 - `GET /api/admin/alerts`
 - `POST /api/admin/alerts/{alert_id}/resolve`
 - `POST /api/admin/alerts/{alert_id}/block`
+- `GET /api/admin/devices`
+- `POST /api/admin/devices/{device_id}/approve`
 - `GET /api/admin/logs`
 - `GET /api/admin/login-attempts`
 - `POST /api/admin/retrain-model`
@@ -342,14 +436,15 @@ drift_score = mean(feature_scores)
 
 This makes PSI the primary signal, keeps KL for monitoring/debugging, and avoids one noisy feature forcing the whole model into drift.
 
-## Recommended Future Security Integrations
+## Enterprise Security Integrations
 
-These integrations are not required for local development and are intentionally not added as dependencies yet.
+These integrations are optional for local development. When keys are present, the backend exposes their configured status in `/api/ai/integrations` and the AI Security dashboard displays them as enterprise capabilities.
 
 IP reputation:
 
 - AbuseIPDB for abuse confidence score, report count, and blacklist checks
 - IPQualityScore for fraud score, VPN/proxy/TOR/bot detection
+- VirusTotal for advanced IP/domain enrichment
 
 Use these to enrich:
 
@@ -361,7 +456,9 @@ login reasons
 
 GeoIP:
 
-- ipinfo.io for city, region, ASN, ISP, and coordinates
+- MaxMind GeoIP2 for city, country, ASN, ISP, and coordinates
+- Leaflet for the free login map
+- Mapbox as an optional premium live attack-map provider
 
 Use this to improve:
 
@@ -374,6 +471,7 @@ country/ASN anomaly scoring
 Device fingerprinting:
 
 - FingerprintJS for stable browser/device identifiers
+- Existing local browser fingerprint fallback for no-key demos
 
 Use this to improve:
 
@@ -385,12 +483,96 @@ account takeover detection
 
 Threat intelligence:
 
-- VirusTotal for known malicious IPs/domains/URLs
+- Have I Been Pwned Pwned Passwords for k-anonymous breached password checks
+
+Authentication and MFA:
+
+- Authy for production MFA
+- Firebase Authentication for OTP and social login options
+- Clerk for modern hosted auth, device, and session management
+- Auth0 as an enterprise adaptive-authentication reference
+
+Email and notifications:
+
+- SendGrid for security emails and OTP delivery
+- Resend for developer-friendly transactional email
+- Brevo for transactional email with a generous free tier
+- SMTP fallback for any provider
+
+Behavioral biometrics:
+
+- Typing cadence and correction rate
+- Mouse velocity and idle ratio
+- Scroll depth and scroll velocity
+- Session-replay anomaly metadata, rrweb-ready without requiring rrweb for local demos
+
+AI/ML upgrade path:
+
+- Isolation Forest is the current model baseline
+- Autoencoders can model higher-dimensional behavioral anomaly patterns
+- XGBoost can combine vendor, device, geo, and behavioral features into a supervised risk score
+- Sequence models can learn user-specific login order, timing, and location patterns
 
 Observability:
 
 - Sentry for frontend/backend exception monitoring
 - PostHog for analytics and model event dashboards
+
+## Production Hardening Roadmap
+
+This project demonstrates an enterprise-inspired adaptive authentication and anomaly detection system for educational and research purposes.
+
+The current implementation focuses on:
+
+- Adaptive MFA
+- Device fingerprinting
+- IP intelligence
+- Anomaly-based risk scoring
+- Behavioral biometrics
+- Trusted device workflows
+- Suspicious login detection
+
+### Future Production Security Enhancements
+
+#### Identity & Access
+
+- RBAC/ABAC authorization
+- SSO federation, SAML/OAuth2/OIDC
+- SCIM provisioning
+- Just-in-time access controls
+
+#### Infrastructure Security
+
+- Secrets rotation with Vault/KMS
+- HSM-backed signing keys
+- WAF integration
+- Zero-trust network policies
+
+#### Audit & Compliance
+
+- Immutable audit logging
+- SIEM integration
+- SOC alert pipelines
+- GDPR/ISO/SOC2 alignment
+
+#### Platform Hardening
+
+- Distributed rate limiting
+- DDoS protection
+- Secure deployment pipelines
+- Container/runtime isolation
+- Threat modeling
+- Security penetration testing
+
+#### Monitoring & Reliability
+
+- Prometheus/Grafana monitoring
+- OpenTelemetry tracing
+- Centralized logging
+- Auto-scaling infrastructure
+- Multi-region failover
+
+This project is designed as a modern security engineering demonstration platform and not as a replacement for commercial IAM providers such as Okta, Microsoft Entra ID, or Cloudflare Access.
 
 Default config:
 
